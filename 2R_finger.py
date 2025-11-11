@@ -14,7 +14,6 @@ from scipy.signal import butter, sosfilt, sosfilt_zi
 # -------------------------
 L1, L2 = 0.15, 0.15          # link lengths (m)
 #Kp, Kd = 30, 2      
-Kp, Kd = 5, 0.1
 TMAX = 2.0
 A = math.radians(30)    # amplitude (±30 deg)
 w = 0.3                 # rad/s (slow to reduce inertia effects)
@@ -255,11 +254,17 @@ def modeled_torque_ID(arm_id, q, qd, qdd):
 # -------------------------
 v_st   = 0.15      # Stribeck transition speed (rad/s) offline calculation
 v_coul = 0.03      # Coulomb saturation speed (rad/s)   offline calculation
-Lambda = 1.5       # tracking surface gain (>=0)
+#Lambda = 1.5       # tracking surface gain (>=0)
 KDs    = 2.0       # feedback gain on s
 Gamma_f = np.diag([0.005, 0.005, 0.001])  # adaptation gains to tune
 # Gamma_f = np.zeros((3,3))
 Gamma_eps = 0.0    # bias integrator increase to enable
+
+Kp, Kd = 5, 0.7
+
+Kd_s = Kd
+Lambda = Kp / Kd_s
+
 
 # init parameters (from offline fit or small positive guesses)
 # theta_f = np.array([0.05, 0.2, 0.03])  # [f_brk - f_c, f_c, f_vis]
@@ -291,13 +296,14 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     
     e  = q  - q_des
     ed = qd - qd_des
+
     if warmup:
         s = 0.0
     else:
         s  = ed + Lambda * e
-        if abs(qd) < 0.05:
+        if abs(qd) < 0.005:
             s=0.0
-        s = np.clip(s, -0.2, 0.2)
+        s = np.clip(s, -0.5, 0.5)
 
 
     # friction estimate
@@ -305,16 +311,15 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     tau_hat_f = float(phi @ theta_f)   # scalar
     tau_hat_f = float(np.clip(tau_hat_f, -2.5, 2.5))
 
-    tau_hat_f =0.0 # TEST, DELETE LATER
+    # tau_hat_f =0.0 # TEST, DELETE LATER
 
 
-    # tau_fb  = -KDs * s
-    # tau_cmd = tau_model + tau_fb - tau_hat_f + eps
-    tau_fb = Kp*(q_des - q) + Kd*(qd_des - qd) # SAFE PD CONTROLER
+    tau_fb  = -Kd_s * s
+    # tau_cmd = tau_model + tau_fb - tau_hat_f + eps #NEGATIVE TAU HAT
+    # tau_fb = Kp*(q_des - q) + Kd*(qd_des - qd) # SAFE PD CONTROLER
     tau_cmd = tau_model + tau_fb + tau_hat_f + eps
 
     # tau_cmd = float(np.clip(tau_cmd, -4.0, 4.0))
-
 
     # # theta_dot = -Gamma_f * phi^T * s
     # theta_update = - (Gamma_f @ (phi * s)) * dt  # broadcasts
@@ -492,8 +497,8 @@ try:
         tau_model0_safe = float(tau_model_safe[0])
 
         tau0_cmd_safe = tau_model0_safe + tau_fb_safe
-        tau0_cmd_safe = float(np.clip(tau0_cmd_safe, -8.0, 8.0))
-        tau_model0 = tau_model0_safe
+        # tau0_cmd_safe = float(np.clip(tau0_cmd_safe, -8.0, 8.0))
+        # tau_model0 = tau_model0_safe
 
         
         # --- call adaptive using FILTERED q, qd ---
@@ -526,8 +531,8 @@ try:
         # p.setJointMotorControlArray(arm_id, [0,1], p.TORQUE_CONTROL, forces=[tau0_cmd, tau1_cmd])
         # p.setJointMotorControlArray(arm_id, [0,1], p.TORQUE_CONTROL, forces=[tau0_cmd_safe, 0.0])
         #APPLY TORQUE WITH KNOWN FRICTION MODEL
-        # tau_applied = tau0_cmd - tau_f_simple(qd_vec[0])   # friction opposes motion
-        tau_applied = tau0_cmd_safe - tau_f_simple(qd_vec[0])   # SAFER VERSION PLS
+        tau_applied = tau0_cmd - tau_f_simple(qd_vec[0])   # friction opposes motion
+        # tau_applied = tau0_cmd_safe - tau_f_simple(qd_vec[0])   # SAFER VERSION PLS
         tau_applied = float(np.clip(tau_applied, -8, 8))
         p.setJointMotorControl2(arm_id, 0, p.TORQUE_CONTROL, force=tau_applied) # ONLY 1 joint
 
