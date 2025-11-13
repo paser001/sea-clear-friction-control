@@ -13,7 +13,7 @@
     <origin xyz="0 0 0.05" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <dynamics damping="0.0" friction="0.0"/>
-    <limit lower="-3.14" upper="3.14" effort="50" velocity="6.0"/>
+    <limit lower="-300.14" upper="300.14" effort="50" velocity="6.0"/>
   </joint>
 
   <link name="link2">
@@ -28,6 +28,6 @@
     <origin xyz="0.15 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <dynamics damping="0.0" friction="0.0"/>
-    <limit lower="-3.14" upper="3.14" effort="50" velocity="6.0"/>
+    <limit lower="-300.14" upper="300.14" effort="50" velocity="6.0"/>  
   </joint>
 </robot>

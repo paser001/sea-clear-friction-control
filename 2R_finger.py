@@ -17,7 +17,7 @@ L1, L2 = 0.15, 0.15          # link lengths (m)
 TMAX = 2.0
 A = math.radians(30)    # amplitude (±30 deg)
 w = 0.3                 # rad/s (slow to reduce inertia effects)
-RUN_SECS = 50.0
+RUN_SECS = 150.0
 DT = 1.0/240.0
 DOF = 2                 
 JIDX = 0                  # identify friction on joint 1
@@ -66,6 +66,7 @@ def sleep_temp(t):
 # -------------------------
 # URDF for the 2R finger
 # -------------------------
+# TODO CHANGE ANGLE LIMITES
 urdf = f"""<?xml version="1.0"?>
 <robot name="finger2r">
   <link name="base"/>
@@ -81,7 +82,7 @@ urdf = f"""<?xml version="1.0"?>
     <origin xyz="0 0 0.05" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <dynamics damping="0.0" friction="0.0"/>
-    <limit lower="-3.14" upper="3.14" effort="50" velocity="6.0"/>
+    <limit lower="-300.14" upper="300.14" effort="50" velocity="6.0"/>
   </joint>
 
   <link name="link2">
@@ -96,7 +97,7 @@ urdf = f"""<?xml version="1.0"?>
     <origin xyz="{L1} 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <dynamics damping="0.0" friction="0.0"/>
-    <limit lower="-3.14" upper="3.14" effort="50" velocity="6.0"/>
+    <limit lower="-300.14" upper="300.14" effort="50" velocity="6.0"/>  
   </joint>
 </robot>
 """
@@ -155,9 +156,12 @@ def tau_f_simple(qd):
     return Fc_simple * np.tanh(qd / v_eps_simple) + Fv_simple * qd
 
 
-def tau_f_true(qd):
-    mag = Fc_true + (Fs_true - Fc_true) * np.exp(-(abs(qd)/vs_true)**2)
-    return mag * np.sign(qd) + Fv_true * qd
+def tau_f_true(qd, simple = False):
+    if simple:
+        return tau_f_simple(qd)
+    else:
+        mag = Fc_true + (Fs_true - Fc_true) * np.exp(-(abs(qd)/vs_true)**2)
+        return mag * np.sign(qd) + Fv_true * qd
 
 
 # ---------- Velocity plateau generator ----------
@@ -165,7 +169,7 @@ def tau_f_true(qd):
 # Target speeds (rad/s) and per-plateau hold duration (s)
 speeds = [ 0.05, 0.10, 0.20, 0.40, 0.80 ]
 plateau_hold = 5.0   # seconds per +v and -v
-tau_ramp = 0.5       # seconds, smooth approach to new target speed
+tau_ramp = 5.0       # seconds, smooth approach to new target speed
 
 def schedule_plateaus():  
     seq = []
@@ -252,11 +256,11 @@ def modeled_torque_ID(arm_id, q, qd, qdd):
 # - 
 # - 
 # -------------------------
-v_st   = 0.15      # Stribeck transition speed (rad/s) offline calculation
-v_coul = 0.03      # Coulomb saturation speed (rad/s)   offline calculation
+v_st   = 0.03     # Stribeck transition speed (rad/s) offline calculation
+v_coul = 0.05      # Coulomb saturation speed (rad/s)   offline calculation
 #Lambda = 1.5       # tracking surface gain (>=0)
 KDs    = 2.0       # feedback gain on s
-Gamma_f = np.diag([0.005, 0.005, 0.001])  # adaptation gains to tune
+Gamma_f = np.diag([0.02, 0.1, 0.02])  # adaptation gains to tune
 # Gamma_f = np.zeros((3,3))
 Gamma_eps = 0.0    # bias integrator increase to enable
 
@@ -267,8 +271,8 @@ Lambda = Kp / Kd_s
 
 
 # init parameters (from offline fit or small positive guesses)
-# theta_f = np.array([0.05, 0.2, 0.03])  # [f_brk - f_c, f_c, f_vis]
-theta_f = np.array([0.0, 0.0, 0.0])  # start neutral
+theta_f = np.array([0.05, 0.05, 0.0001])  # [f_brk - f_c, f_c, f_vis]
+# theta_f = np.array([0.0, 0.0, 0.0])  # start neutral
 
 eps = 0.0
 
@@ -329,7 +333,7 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
         theta_new = theta_f - (Gamma_f @ (phi * s)) * dt
         theta_new[1] = max(theta_new[1], 0.0)  # f_c sempre positivo
         theta_new[2] = max(theta_new[2], 0.0)  # f_vis sempre positivo
-        delta = np.clip(theta_new - theta_f, -0.02, 0.02)
+        delta = np.clip(theta_new - theta_f, -0.02, 0.02) # TO TUNE
         theta_f[:] = theta_f + delta
 
     # # bias integrator
@@ -349,6 +353,7 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
 # - 
 # - 
 # -------------------------
+TEST_MODE = "SIN"  # "PLATEAUS", "SIN"
 err_int = 0.0
 slide = True
 qd_prev = np.zeros(2)
@@ -363,6 +368,9 @@ zi_a = sosfilt_zi(sos_a)
 
 q_prev = 0.0
 qd_f_prev = 0.0
+
+Kd_warmup = 8.0
+Kp_warmup = 0.4
 
 DERIVATIVE_MODE = "butter"  # "NUM", "SAVGOL", "butter"
 
@@ -399,10 +407,27 @@ try:
         # FREEZE JOINT 1
         p.setJointMotorControl2(arm_id, 1, p.POSITION_CONTROL, targetPosition=0.0, force=100, positionGain=1, velocityGain=1.0)
 
-        # Desired traject joint 0; joint 1 stays still fah now
-        q0_des  = A * math.sin(w*t)
-        qd0_des = A*w * math.cos(w*t)
-        qdd0_des = -A*w*w * math.sin(w*t)
+
+        if TEST_MODE == "SIN":
+            # Desired traject joint 0; joint 1 stays still fah now
+            q0_des  = A * math.sin(w*t)
+            qd0_des = A*w * math.cos(w*t)
+            qdd0_des = -A*w*w * math.sin(w*t)
+        elif TEST_MODE == "PLATEAUS":
+            # Plateau velocity profile
+            plateau_time = plateau_hold + tau_ramp
+            n_plateaus = len(speeds) * 2
+            total_time = n_plateaus * plateau_time
+            t_mod = t % total_time
+            idx = int(t_mod // plateau_time)
+            v_target = schedule_plateaus()[idx]
+            if i == 0:
+                v_ref = 0.0
+            v_ref = v_ref + alpha * (v_target - v_ref)
+
+            q0_des = v_ref * t
+            qd0_des = v_ref
+            qdd0_des = 0.0
 
         # Read state
         q_vec  = [p.getJointState(arm_id, j)[0] for j in (0,1)]
@@ -509,7 +534,7 @@ try:
 
         if not ready and DERIVATIVE_MODE == "SAVGOL":
            # WARM-UP: PD + model ONLY (no adaptive, no θ update)
-            tau_fb  = Kp*(q0_des - q0) + Kd*(qd0_des - qd0_f)
+            tau_fb  = Kp_warmup*(q0_des - q0) + Kd_warmup*(qd0_des - qd0_f)
             tau0_cmd = tau_model0 + tau_fb
             tau0_hat_f = 0.0
             s0 = 0.0
@@ -531,12 +556,12 @@ try:
         # p.setJointMotorControlArray(arm_id, [0,1], p.TORQUE_CONTROL, forces=[tau0_cmd, tau1_cmd])
         # p.setJointMotorControlArray(arm_id, [0,1], p.TORQUE_CONTROL, forces=[tau0_cmd_safe, 0.0])
         #APPLY TORQUE WITH KNOWN FRICTION MODEL
-        tau_applied = tau0_cmd - tau_f_simple(qd_vec[0])   # friction opposes motion
+        tau_applied = tau0_cmd - tau_f_true(qd_vec[0], simple = False)   # friction opposes motion
         # tau_applied = tau0_cmd_safe - tau_f_simple(qd_vec[0])   # SAFER VERSION PLS
         tau_applied = float(np.clip(tau_applied, -8, 8))
         p.setJointMotorControl2(arm_id, 0, p.TORQUE_CONTROL, force=tau_applied) # ONLY 1 joint
 
-        print("TORQUE SAFE:", tau0_cmd_safe, "TORQUE ADAPTIVE:", tau0_cmd, "TORQUE APPLIED:", tau_applied)
+        # print("TORQUE SAFE:", tau0_cmd_safe, "TORQUE ADAPTIVE:", tau0_cmd, "TORQUE APPLIED:", tau_applied)
         
         p.stepSimulation()
         time.sleep(DT)
