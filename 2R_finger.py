@@ -12,19 +12,21 @@ from scipy.signal import butter, sosfilt, sosfilt_zi
 # -------------------------
 # Config
 # -------------------------
-L1, L2 = 0.15, 0.15          # link lengths (m)
+L1, L2 = 0.5, 0.5          # link lengths
+M1= 2.0
+M2= 2.0
 TMAX = 2.0
-A = math.radians(30)    # amplitude (±30 deg)
-w = 0.3                 # rad/s (slow to reduce inertia effects)
-RUN_SECS = 150.0
+A = math.radians(30)    # amplit
+w = 0.3                 # rad/s
+RUN_SECS = 30.0
 DT = 1.0/240.0
 DOF = 2                 
 JIDX = 0                  # identify friction on joint 1
 OTHER = 1
 t0 = time.time()
 log = []
-WIN = 31         # window size (must be odd)
-POLY = 3         # polynomial order (2 or 3 works well)
+WIN = 31         # window size (gotta be odd)
+POLY = 3         # polynomial order filtre
 
 START_POS = [0 , 0]
 
@@ -33,9 +35,8 @@ t_hist  = deque(maxlen=WIN)
 
 
 
-# joint indices: 0 -> joint1, 1 -> joint2
-EE_LINK = 1  # link2
-LOCAL_TIP = [L2/2, 0, 0]  # fingertip position in link2 frame (relative to COM)
+EE_LINK = 1  
+LOCAL_TIP = [L2/2, 0, 0]  # fingertip position in link2 frame
 
 
 # ---------- True friction (plant) ----------
@@ -52,11 +53,23 @@ v_eps_simple = 0.02   # smoothing speed [rad/s]
 
 
 # ----- Plateau config -----
-q_min = -0.8   # rad, joint 0 lower bound
-q_max =  0.8   # rad, joint 0 upper bound
+q_min = -0.8   # rlower bound
+q_max =  0.8   # upper bound
 
-plateau_speeds = [0.1, 0.2, 0.3, 0.4, 0.5]   # rad/s
+plateau_speeds = [0.1, 0.2, 0.3, 0.4, 0.5]   
 plateau_time   = 3.0               # seconds per plateau
+
+
+# PLATEU 2
+plateau_segments = [
+    (-0.8, -0.4, 0.2),
+    (-0.4,  0.0, 0.3),
+    ( 0.0,  0.4, 0.4),
+    ( 0.4,  0.8, 0.5),
+]
+
+seg_idx  = 0
+dir_sign = +1   # +1 going forward through segments, -1 backward
 
 
 # State for excitation
@@ -71,14 +84,14 @@ q0_des    = 0.0        # desired joint position
 # - 
 # - 
 # -------------------------
-v_st   = 0.08     # Stribeck transition speed (rad/s) offline calculation
+v_st   = 0.1     # Stribeck transition speed (rad/s) offline calculation
 v_coul = 0.05      # Coulomb saturation speed (rad/s)   offline calculation
 KDs    = 2.0       # feedback gain on s
 Gamma_f = np.diag([0.02, 0.1, 0.02])  # adaptation gains to tune
 # Gamma_f = np.zeros((3,3))
 Gamma_eps = 0.0    # bias integrator increase to enable
 
-Kp, Kd = 1, 1.2   # KD= 5 is good for adaptive on
+Kp, Kd = 1, 1.3   # KD= 5 is good for adaptive on
 
 Kd_s = Kd
 # Lambda = Kp / Kd_s
@@ -87,7 +100,8 @@ Lambda = 0.5       # 0.5 is good for adapative on
 # init parameters (from offline fit or small positive guesses)
 # theta_f = np.array([0.01, 0.01, 0.005])  # [f_brk - f_c, f_c, f_vis]
 theta_f = np.array([0.015, 0.08, 0.015])
-# theta_f = np.array([0.0, 0.0, 0.0])  # start neutral
+# theta_f = np.array([0.0, 0.0, 0.0])  # start neutral 
+s_clip = 0.5
 
 ADAPTATION = True
 
@@ -108,7 +122,6 @@ Kd_warmup = 8.0
 Kp_warmup = 0.4
 
 DERIVATIVE_MODE = "butter"  # "NUM", "SAVGOL", "butter"
-
 
 
 
@@ -152,7 +165,7 @@ urdf = f"""<?xml version="1.0"?>
 <robot name="finger2r">
   <link name="base"/>
   <link name="link1">
-    <inertial><origin xyz="{L1/2} 0 0"/><mass value="0.5"/><inertia ixx="1e-4" iyy="1e-4" izz="1e-4"/></inertial>
+    <inertial><origin xyz="{L1/2} 0 0"/><mass value="M1"/><inertia ixx="0.0417" iyy="0.0417" izz="0.0417"/></inertial>
     <visual><origin xyz="{L1/2} 0 0"/><geometry><box size="{L1} 0.02 0.02"/></geometry></visual>
     <collision><origin xyz="{L1/2} 0 0"/><geometry><box size="{L1} 0.02 0.02"/></geometry></collision>
   </link>
@@ -167,7 +180,7 @@ urdf = f"""<?xml version="1.0"?>
   </joint>
 
   <link name="link2">
-    <inertial><origin xyz="{L2/2} 0 0"/><mass value="0.01"/><inertia ixx="1e-6" iyy="1e-6" izz="1e-6"/></inertial>
+    <inertial><origin xyz="{L2/2} 0 0"/><mass value="M2"/><inertia ixx="1e-6" iyy="1e-6" izz="1e-6"/></inertial>
     <visual><origin xyz="{L2/2} 0 0"/><geometry><box size="{L2} 0.018 0.018"/></geometry></visual>
     <collision><origin xyz="{L2/2} 0 0"/><geometry><box size="{L2} 0.018 0.018"/></geometry></collision>
   </link>
@@ -207,14 +220,14 @@ for j in (0,1):
     p.setJointMotorControl2(arm_id, j, p.VELOCITY_CONTROL, force=0)
 
 # Move to an angle positon over some steps
-def goto(q1, q2, steps=480):
+def goto(id, q1, q2, steps=480):
     for j, q in enumerate([q1,q2]):
-        p.setJointMotorControl2(arm_id, j, p.POSITION_CONTROL, targetPosition=q, force=20, positionGain=0.1, velocityGain=1.0)
+        p.setJointMotorControl2(id, j, p.POSITION_CONTROL, targetPosition=q, force=20, positionGain=0.1, velocityGain=1.0)
     for _ in range(steps):
         p.stepSimulation(); time.sleep(DT)
     # release motors for torque control
     for j in (0,1):
-        p.setJointMotorControl2(arm_id, j, p.VELOCITY_CONTROL, force=0)
+        p.setJointMotorControl2(id, j, p.VELOCITY_CONTROL, force=0)
 
 
 def tau_f_simple(qd):
@@ -242,9 +255,12 @@ def plateau_builder():
 # ---------- Disable default motors, center pose ----------
 for j in (0,1):
     p.setJointMotorControl2(arm_id, j, p.VELOCITY_CONTROL, force=0)
+for j in (0,1):
+    p.setJointMotorControl2(ghost_id, j, p.VELOCITY_CONTROL, force=0)
 # Initial pose: reach to near wall # WALL IS GONE :(
 # goto(q1=-0.59695293, q2=-0.39810182, steps=1)
-goto(q1=START_POS[0], q2=START_POS[1])
+goto(arm_id, q1=START_POS[0], q2=START_POS[1])
+goto(ghost_id, q1=START_POS[0], q2=START_POS[1])
 sleep_temp(480)
 for j in (0,1): 
     p.setJointMotorControl2(arm_id, j, p.VELOCITY_CONTROL, force=0)
@@ -302,19 +318,18 @@ def coriolis_term_Cqd(arm_id, q, qd):
     return tau_id - gravity_torque_G(arm_id, q)
 
 def modeled_torque_ID(arm_id, q, qd, qdd):
-    # tau_model = M(q) qdd + C(q,qd) qd + G(q)
     return np.array(p.calculateInverseDynamics(arm_id, q, qd, qdd))
 
 
 
-def Yf1(v, v_st, v_coul):
+def Yf1(v, v_st, v_coul): # OVERFLOWS QUITE OFTEN
     return np.array([
         np.exp(-(v / v_st)) * (v / v_st),
         np.tanh(v / v_coul),
         v
     ])  # shape (3,) but check error
 
-def Yf2(v, v_st, v_coul, v_clip=2.0, eps=1e-6):
+def Yf2(v, v_st, v_coul, v_clip=2.0, eps=1e-6):  # SAFE CHAT GPT VERSION
     v_st   = max(abs(v_st), eps)
     v_coul = max(abs(v_coul), eps)
     v_sat  = float(np.clip(v, -v_clip, v_clip))
@@ -338,7 +353,7 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
         s  = ed + Lambda * e
         if abs(qd) < 0.005:
             s=0.0
-        s = np.clip(s, -0.5, 0.5)
+        s = np.clip(s, -s_clip, s_clip)
 
 
 
@@ -364,7 +379,7 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
         theta_new = theta_f - (Gamma_f @ (phi * s)) * dt
         theta_new[1] = max(theta_new[1], 0.0)  # f_c sempre positivo
         theta_new[2] = max(theta_new[2], 0.0)  # f_vis sempre positivo
-        delta = np.clip(theta_new - theta_f, -0.05, 0.05) # TO TUNE
+        delta = np.clip(theta_new - theta_f, -0.1, 0.1) # TO TUNE
         theta_f[:] = theta_f + delta
 
     # # bias integrator
@@ -372,7 +387,6 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     #     eps += -Gamma_eps * s * dt
 
     return tau_cmd, tau_hat_f, s, theta_f.copy(), eps
-
 
 
 
@@ -396,6 +410,17 @@ zi_a = sosfilt_zi(sos_a)
 
 i = 0
 
+# ----- Plateau excitation state -----
+plateau_seq = plateau_builder()      # build once
+exc_idx = 0                          # which plateau (index in plateau_seq)
+v_ref = 0.0                          # filtered/commanded velocity
+q0_des = p.getJointState(arm_id, 0)[0]  # start from current q0
+
+t_sim = 0.0                          # simulation time (integrated, not wall-clock)
+t_plateau = 0.0                      # time spent in current plateau
+alpha = 2.0 * DT                     # ramp factor for v_ref
+
+
 
 p.changeVisualShape(arm_id, 1, rgbaColor=[1, 0, 0, 1]) # turn arm red
 p.changeVisualShape(arm_id, 0, rgbaColor=[0, 1, 0, 1]) # turn arm green
@@ -413,7 +438,7 @@ try:
         if ord('s') in keys and keys[ord('s')] & p.KEY_WAS_TRIGGERED:
             set_camera_side()
         if ord('r') in keys and keys[ord('r')] & p.KEY_WAS_TRIGGERED:
-            goto(q1=-0.59695293, q2=-0.39810182, steps=240)
+            goto(arm_id, q1=-0.59695293, q2=-0.39810182, steps=240)
             err_int = 0.0
             i = 0
             sleep_temp(240)
@@ -434,43 +459,71 @@ try:
             qd0_des = A*w * math.cos(w*t)
             qdd0_des = -A*w*w * math.sin(w*t)
         elif TEST_MODE == "PLATEAUS":
-            # ----------------- Plateau excitation for joint 0 -----------------
-            plateau_seq = plateau_builder()
-            if t == 0.0:
-                exc_t0 = 0.0
-                exc_idx = 0
-                v_ref = 0.0
-                q0_des = q_vec[0]  # start from current position
+            t_sim += DT
+            t_plateau += DT
 
-            # target velocity for this plateau
+            # if plateau time elapsed, switch to next plateau speed
+            if t_plateau > plateau_time:
+                exc_idx = (exc_idx + 1) % len(plateau_seq)
+                t_plateau = 0.0
+                print("v_tgt =", plateau_seq[exc_idx])
+
             v_tgt = plateau_seq[exc_idx]
 
-            # if plateau time elapsed, move to next
-            if t - exc_t0 > plateau_time:
-                exc_idx = (exc_idx + 1) % len(plateau_seq)
-                exc_t0  = t
-                v_tgt   = plateau_seq[exc_idx]
-                print("v_tgt:", v_tgt)
+            # smooth ramp to target velocity
+            v_ref = v_ref + alpha * (v_tgt - v_ref)
 
-            # (optional) smooth ramp to target velocity to avoid jerk
-            alpha = 2.0 * DT   # smaller = slower ramp
+            # integrate velocity to get desired position
+            q0_des = q0_des + v_ref * DT
+
+            # clamp position and reflect velocity if we hit joint limits
+            if q0_des > q_max:
+                q0_des = q_max
+                v_ref  = -abs(v_ref)
+                #t_plateau = 0.0               # restart plateau timer on bounce
+            elif q0_des < q_min:
+                q0_des = q_min
+                v_ref  = +abs(v_ref)
+                #t_plateau = 0.0
+
+            qd0_des  = v_ref
+            qdd0_des = 0.0    # constant-velocity plateaus
+
+        elif TEST_MODE == "PLATEAUS2":
+            # current segment info
+            q_lo, q_hi, v_mag = plateau_segments[seg_idx]
+            v_tgt = dir_sign * v_mag
+
+            # smooth ramp in velocity
             v_ref = v_ref + alpha * (v_tgt - v_ref)
 
             # integrate to get desired position
             q0_des = q0_des + v_ref * DT
 
-            # clamp desired position to [q_min, q_max] and reflect direction if we hit a wall
-            if q0_des > q_max:
-                q0_des = q_max
-                v_ref  = -abs(v_ref)    # flip direction
-                exc_t0 = t              # restart plateau timer
-            elif q0_des < q_min:
-                q0_des = q_min
-                v_ref  = abs(v_ref)
-                exc_t0 = t
+            # check if we left the current [q_lo, q_hi] window
+            left_segment = (q0_des < q_lo) or (q0_des > q_hi)
+
+            if left_segment:
+                # clamp back inside
+                q0_des = min(max(q0_des, q_lo), q_hi)
+
+                # advance / rewind segment index
+                seg_idx += dir_sign
+                if seg_idx >= len(plateau_segments):
+                    seg_idx = len(plateau_segments) - 1
+                    dir_sign = -1    # bounce and go backwards
+                elif seg_idx < 0:
+                    seg_idx = 0
+                    dir_sign = +1    # bounce and go forwards
+
+                # recompute new target speed for the new segment
+                q_lo, q_hi, v_mag = plateau_segments[seg_idx]
+                v_tgt = dir_sign * v_mag
+                v_ref = v_tgt   # or keep smooth ramp if you prefer
 
             qd0_des  = v_ref
-            qdd0_des = 0.0  # approx constant velocity in plateaus
+            qdd0_des = 0.0
+
 
 
         # Read state
@@ -549,11 +602,17 @@ try:
             # q_prev= q0
 
 
+            # tau_model = np.array(p.calculateInverseDynamics(
+            #     arm_id,
+            #     [q_prev,  0.0],
+            #     [qd0_f, 0.0],
+            #     [qdd0_f,0.0]
+            # ))
             tau_model = np.array(p.calculateInverseDynamics(
                 arm_id,
-                [q_prev,  0.0],
-                [qd0_f, 0.0],
-                [qdd0_f,0.0]
+                [q0_des,  0.0],
+                [qd0_des, 0.0],
+                [qdd0_des,0.0]
             ))
             tau_model0 = float(tau_model[0])
             
