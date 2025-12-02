@@ -9,6 +9,7 @@ from collections import deque
 
 from scipy.signal import butter, sosfilt, sosfilt_zi
 
+
 # -------------------------
 # Config
 # -------------------------
@@ -18,7 +19,7 @@ M2= 2.0
 TMAX = 2.0
 A = math.radians(30)    # amplit
 w = 0.3                 # rad/s
-RUN_SECS = 30.0
+RUN_SECS = 150.0
 DT = 1.0/240.0
 DOF = 2                 
 JIDX = 0                  # identify friction on joint 1
@@ -32,7 +33,6 @@ START_POS = [0 , 0]
 
 q_hist  = deque(maxlen=WIN)
 t_hist  = deque(maxlen=WIN)
-
 
 
 EE_LINK = 1  
@@ -51,13 +51,12 @@ Fv_simple = 0.02      # viscous friction [Nms/rad]
 v_eps_simple = 0.02   # smoothing speed [rad/s]
 
 
-
 # ----- Plateau config -----
 q_min = -0.8   # rlower bound
 q_max =  0.8   # upper bound
 
-plateau_speeds = [0.1, 0.2, 0.3, 0.4, 0.5]   
-plateau_time   = 3.0               # seconds per plateau
+plateau_speeds = [0.1, 0.2, 0.3]   
+plateau_time   = 9.0               # seconds per plateau
 
 
 # PLATEU 2
@@ -71,7 +70,6 @@ plateau_segments = [
 seg_idx  = 0
 dir_sign = +1   # +1 going forward through segments, -1 backward
 
-
 # State for excitation
 exc_idx   = 0          # plateau_seq index
 exc_t0    = 0.0        # start time current plateau
@@ -84,23 +82,33 @@ q0_des    = 0.0        # desired joint position
 # - 
 # - 
 # -------------------------
+
 v_st   = 0.1     # Stribeck transition speed (rad/s) offline calculation
 v_coul = 0.05      # Coulomb saturation speed (rad/s)   offline calculation
-KDs    = 2.0       # feedback gain on s
+
+
+
 Gamma_f = np.diag([0.02, 0.1, 0.02])  # adaptation gains to tune
 # Gamma_f = np.zeros((3,3))
 Gamma_eps = 0.0    # bias integrator increase to enable
 
-Kp, Kd = 1, 1.3   # KD= 5 is good for adaptive on
 
+
+
+
+
+Kp, Kd = 1, 5   # KD= 5 is good for adaptive on
 Kd_s = Kd
 # Lambda = Kp / Kd_s
-Lambda = 0.5       # 0.5 is good for adapative on
+Lambda = 0.5     # 0.5 is good for adapative on
 
-# init parameters (from offline fit or small positive guesses)
-# theta_f = np.array([0.01, 0.01, 0.005])  # [f_brk - f_c, f_c, f_vis]
-theta_f = np.array([0.015, 0.08, 0.015])
-# theta_f = np.array([0.0, 0.0, 0.0])  # start neutral 
+# tau_fb  = -Kd_s * s
+# s  = edot + Lambda * e
+
+# init parameters offline fit or small positive guesses
+# theta_f = np.array([0.01, 0.01, 0.005])
+# theta_f = np.array([0.015, 0.08, 0.015])
+theta_f = np.array([0.0, 0.0, 0.0])  # start neutral 
 s_clip = 0.5
 
 ADAPTATION = True
@@ -113,7 +121,7 @@ err_int = 0.0
 slide = True
 qd_prev = np.zeros(2)
 FS = 1/DT
-CUTOFF = 25.0  # Hz
+CUTOFF = 25.0  # Hz for filtering
 
 q_prev = 0.0
 qd_f_prev = 0.0
@@ -122,7 +130,6 @@ Kd_warmup = 8.0
 Kp_warmup = 0.4
 
 DERIVATIVE_MODE = "butter"  # "NUM", "SAVGOL", "butter"
-
 
 
 # -------------------------
@@ -135,15 +142,15 @@ p.setGravity(0, 0, -9.81) # WITH GRAVITY
 # p.setGravity(0,0,0)      # NO GRAVITY
 p.setTimeStep(DT)
 
-# Make contacts frictionmaxxin and stable
+#contacts frictionmaxxin and stable
 p.setPhysicsEngineParameter(numSolverIterations=200, numSubSteps=2, contactERP=0.3, frictionERP=0.3)
 p.loadURDF("plane.urdf")
 
 def set_camera_top():
-    p.resetDebugVisualizerCamera(cameraDistance=1.0,
+    p.resetDebugVisualizerCamera(cameraDistance=2.0,
                                  cameraYaw=90,
                                  cameraPitch=-89,
-                                 cameraTargetPosition=[0.1, 0.05, 0.05])
+                                 cameraTargetPosition=[1, 0.1, 0.05])
 
 def set_camera_side():
     p.resetDebugVisualizerCamera(cameraDistance=1.2,
@@ -165,9 +172,9 @@ urdf = f"""<?xml version="1.0"?>
 <robot name="finger2r">
   <link name="base"/>
   <link name="link1">
-    <inertial><origin xyz="{L1/2} 0 0"/><mass value="M1"/><inertia ixx="0.0417" iyy="0.0417" izz="0.0417"/></inertial>
-    <visual><origin xyz="{L1/2} 0 0"/><geometry><box size="{L1} 0.02 0.02"/></geometry></visual>
-    <collision><origin xyz="{L1/2} 0 0"/><geometry><box size="{L1} 0.02 0.02"/></geometry></collision>
+    <inertial><origin xyz="{L1/2} 0 0"/><mass value="2.0"/><inertia ixx="0.0417" iyy="0.0417" izz="0.0417"/></inertial>
+    <visual><origin xyz="{L1/2} 0 0"/><geometry><box size="{L1} 0.08 0.08"/></geometry></visual>
+    <collision><origin xyz="{L1/2} 0 0"/><geometry><box size="{L1} 0.08 0.08"/></geometry></collision>
   </link>
 
   <joint name="joint1" type="revolute">
@@ -180,9 +187,9 @@ urdf = f"""<?xml version="1.0"?>
   </joint>
 
   <link name="link2">
-    <inertial><origin xyz="{L2/2} 0 0"/><mass value="M2"/><inertia ixx="1e-6" iyy="1e-6" izz="1e-6"/></inertial>
-    <visual><origin xyz="{L2/2} 0 0"/><geometry><box size="{L2} 0.018 0.018"/></geometry></visual>
-    <collision><origin xyz="{L2/2} 0 0"/><geometry><box size="{L2} 0.018 0.018"/></geometry></collision>
+    <inertial><origin xyz="{L2/2} 0 0"/><mass value="0.01"/><inertia ixx="1e-6" iyy="1e-6" izz="1e-6"/></inertial>
+    <visual><origin xyz="{L2/2} 0 0"/><geometry><box size="{L2} 0.08 0.08"/></geometry></visual>
+    <collision><origin xyz="{L2/2} 0 0"/><geometry><box size="{L2} 0.08 0.08"/></geometry></collision>
   </link>
 
   <joint name="joint2" type="revolute">
@@ -266,7 +273,6 @@ for j in (0,1):
     p.setJointMotorControl2(arm_id, j, p.VELOCITY_CONTROL, force=0)
 
 
-
 # ---------- Logging setup ----------
 
 os.makedirs("csvs", exist_ok=True)
@@ -274,13 +280,14 @@ csv_path = f"csvs/fric_sweep_{datetime.now():%Y-%m-%d_%H-%M-%S}.csv"
 log = []
 header = [
     "t",
-    "q","qd","qdd",
+    "q","qd_f","qdd_f",
     "q_des","qd_des","qdd_des",
-    "tau_cmd","tau_meas","tau_model",
-    "tau_res","tau_hat_f",
+    "tau_cmd","tau_model",
+    "tau_res","tau_hat_f", "tau_f_true","tau_f_err",
     "theta1","theta2","theta3",
-    "s", "qd_f","qd_raw"
+    "s"
 ]
+
 
 
 # Helper: end-effector world pose
@@ -332,6 +339,7 @@ def Yf1(v, v_st, v_coul): # OVERFLOWS QUITE OFTEN
 def Yf2(v, v_st, v_coul, v_clip=2.0, eps=1e-6):  # SAFE CHAT GPT VERSION
     v_st   = max(abs(v_st), eps)
     v_coul = max(abs(v_coul), eps)
+    print ("v_st:", v_st, "v_coul:", v_coul)
     v_sat  = float(np.clip(v, -v_clip, v_clip))
     # use |v|/v_st in the Stribeck envelope; keep odd symmetry via the multiplier
     return np.array([
@@ -347,15 +355,16 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     e  = q  - q_des
     ed = qd - qd_des
 
+    print("e:", e, "ed:", ed)
+
     if warmup:
         s = 0.0
     else:
         s  = ed + Lambda * e
-        if abs(qd) < 0.005:
-            s=0.0
-        s = np.clip(s, -s_clip, s_clip)
+        s = np.clip(s, -1, 1)
+        s_adapt = np.clip(s, -s_clip, s_clip)
 
-
+    print("s:", s)
 
     # friction estimate
     phi = Yf2(qd, v_st, v_coul)         # (3,)
@@ -366,7 +375,6 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
 
 
     tau_fb  = -Kd_s * s
-    # tau_cmd = tau_model + tau_fb - tau_hat_f + eps #NEGATIVE TAU HAT
     # tau_fb = Kp*(q_des - q) + Kd*(qd_des - qd) # SAFE PD CONTROLER
     tau_cmd = tau_model + tau_fb + tau_hat_f #+ eps
 
@@ -375,11 +383,11 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     # theta_update = - (Gamma_f @ (phi * s)) * dt  # broadcasts
     # theta_new = theta_f + theta_update
     
-    if s != 0.0 and ADAPTATION == True : # only learn when moving
-        theta_new = theta_f - (Gamma_f @ (phi * s)) * dt
+    if abs(s)>0.01 and abs(s)<0.5 and abs(qd)>0.03 and ADAPTATION == True : # only learn when moving
+        theta_new = theta_f - (Gamma_f @ (phi * s_adapt)) * dt
         theta_new[1] = max(theta_new[1], 0.0)  # f_c sempre positivo
         theta_new[2] = max(theta_new[2], 0.0)  # f_vis sempre positivo
-        delta = np.clip(theta_new - theta_f, -0.1, 0.1) # TO TUNE
+        delta = np.clip(theta_new - theta_f, -0.02, 0.02) # TO TUNE
         theta_f[:] = theta_f + delta
 
     # # bias integrator
@@ -387,9 +395,6 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     #     eps += -Gamma_eps * s * dt
 
     return tau_cmd, tau_hat_f, s, theta_f.copy(), eps
-
-
-
 
 
 
@@ -419,6 +424,8 @@ q0_des = p.getJointState(arm_id, 0)[0]  # start from current q0
 t_sim = 0.0                          # simulation time (integrated, not wall-clock)
 t_plateau = 0.0                      # time spent in current plateau
 alpha = 2.0 * DT                     # ramp factor for v_ref
+
+qd_des_prev = 0.0
 
 
 
@@ -487,7 +494,8 @@ try:
                 #t_plateau = 0.0
 
             qd0_des  = v_ref
-            qdd0_des = 0.0    # constant-velocity plateaus
+            qdd0_des = (qd0_des - qd_des_prev) / DT  # approximate acceleration
+            qd_des_prev = qd0_des
 
         elif TEST_MODE == "PLATEAUS2":
             # current segment info
@@ -599,21 +607,24 @@ try:
             # TEST TEST TEST
             # qd0_f = qd0
             # qdd0_f = qdd0_des
+            # qdd0_f = 0.0
             # q_prev= q0
 
+            tau_model = np.array(p.calculateInverseDynamics(
+                arm_id,
+                [q0,  0.0],
+                [qd0_f, 0.0],
+                [qdd0_f,0.0]
+            ))
 
             # tau_model = np.array(p.calculateInverseDynamics(
             #     arm_id,
-            #     [q_prev,  0.0],
-            #     [qd0_f, 0.0],
-            #     [qdd0_f,0.0]
+            #     [q0_des,  0.0],
+            #     [qd0_des, 0.0],
+            #     [qdd0_des,0.0]
             # ))
-            tau_model = np.array(p.calculateInverseDynamics(
-                arm_id,
-                [q0_des,  0.0],
-                [qd0_des, 0.0],
-                [qdd0_des,0.0]
-            ))
+            print("q0_des:", q0_des, "qd0_des:", qd0_des, "qdd0_des:", qdd0_des)
+            print("TM:", tau_model)
             tau_model0 = float(tau_model[0])
             
 
@@ -635,7 +646,6 @@ try:
         # tau0_cmd_safe = float(np.clip(tau0_cmd_safe, -8.0, 8.0))
         # tau_model0 = tau_model0_safe
 
-        
         # --- call adaptive using FILTERED q, qd ---
 
         speed_ok = abs(qd0_f) > 0.05     # avoid reversals/standstill
@@ -658,18 +668,17 @@ try:
                 dt=DT, tau_model=tau_model0,
                 warmup=False
             )
-
-        
     
         # Apply torques
         # p.setJointMotorControlArray(arm_id, [0,1], p.TORQUE_CONTROL, forces=[tau0_cmd, tau1_cmd])
         # p.setJointMotorControlArray(arm_id, [0,1], p.TORQUE_CONTROL, forces=[tau0_cmd_safe, 0.0])
         #APPLY TORQUE WITH KNOWN FRICTION MODEL
-        tau_applied = tau0_cmd - tau_f_true(qd_vec[0], simple = False)   # friction opposes motion 
+        tau_f_true_val = tau_f_true(qd_vec[0], simple = False)
+        tau_applied = tau0_cmd - tau_f_true_val   # friction opposes motion 
         # tau_applied = tau0_cmd_safe - tau_f_simple(qd_vec[0])   # SAFER VERSION PLS
-        tau_applied = float(np.clip(tau_applied, -80, 80))
+        tau_applied = float(np.clip(tau_applied, -8, 8))
         p.setJointMotorControl2(arm_id, 0, p.TORQUE_CONTROL, force=tau_applied) # ONLY 1 joint
-
+        # p.setJointMotorControl2(arm_id, 0, p.TORQUE_CONTROL, 2) # TEST 2Nm
         # print("TORQUE SAFE:", tau0_cmd_safe, "TORQUE ADAPTIVE:", tau0_cmd, "TORQUE APPLIED:", tau_applied)
         
         p.stepSimulation()
@@ -685,10 +694,10 @@ try:
                 t,
                 float(q_vec[JIDX]), float(qd0_f), float(qdd0_f),
                 q0_des, qd0_des, qdd0_des,
-                float(tau0_cmd), float(tau_meas0), float(tau_model0),
-                float(tau_res0), float(tau0_hat_f),
+                float(tau0_cmd), float(tau_model0),
+                float(tau_res0), float(tau0_hat_f), float(tau_f_true_val), float(abs(tau_f_true_val - tau0_hat_f)),
                 float(theta_snapshot[0]), float(theta_snapshot[1]), float(theta_snapshot[2]),
-                float(s0), float(qd0_f), float(qd0)
+                float(s0),
             ])
         # print("torque1:" , p.getJointState(arm_id, 0)[3], "torque2:", p.getJointState(arm_id, 1)[3])
         # print("tau1:" , tau1, "tau_meas:", tau1_meas, "tau_model:", tau_model[0], "tau_res:", tau1_res)
