@@ -17,8 +17,14 @@ L1, L2 = 0.5, 0.5          # link lengths
 M1= 2.0
 M2= 2.0
 TMAX = 2.0
-RUN_SECS = 500.0
+RUN_SECS = 660.0
 RUN1_SECS = 120.0
+RUN2_SECS = 420.0
+RUN3_SECS= 480.0
+RUN4_SECS = 540.0
+
+
+
 DT = 1.0/240.0
 DOF = 1               
 JIDX = 0                  # identify friction on joint 1
@@ -54,7 +60,7 @@ v_eps_simple = 0.02   # smoothing speed [rad/s]
 q_min = -1.8   # rlower bound
 q_max =  1.8   # upper bound
 
-plateau_speeds = [0.1, 0.2, 0.3,0.4,0.5]  # rad.sec^-1
+plateau_speeds = [0.3,0.5, 0.8, 1.6, 2.0]  # rad.sec^-1
 plateau_time   = 15.0               # seconds per plateau
 
 
@@ -99,7 +105,7 @@ Gamma_eps = 0.0    # bias integrator increase to enable
 
 
 Kp, Kd = 1, 0.5   # KD= 5 is good for adaptive on
-Kd_s = 10
+Kd_s =5
 # Lambda = Kp / Kd_s
 Lambda = 1.2     # 0.5 is good for adapative on
 
@@ -389,7 +395,7 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     # theta_update = - (Gamma_f @ (phi * s)) * dt  # broadcasts
     # theta_new = theta_f + theta_update
     
-    if abs(s)>0.008 and abs(s_adapt)<0.5 and abs(qd)>0.05 and ADAPTATION == True : # only learn when moving
+    if abs(s)>0.008 and abs(s_adapt)<0.5 and abs(qd)>0.1 and ADAPTATION == True : # only learn when moving
         if abs(qd)<1.5:
             # theta_new = theta_f - ([Gamma_f[0],Gamma_f[1],0.0] @ (phi * s_adapt)) * dt
             theta_new = theta_f - (Gamma_f @ (phi * s_adapt)) * dt
@@ -466,8 +472,17 @@ try:
 
 
         t = time.time() - t0
-        if t > RUN1_SECS:
+        if t > RUN1_SECS and t < RUN2_SECS:
             TEST_MODE = "PLATEAUS"
+        elif t > RUN2_SECS and t < RUN3_SECS:
+            w=2.5
+            TEST_MODE = "SIN"
+        elif t > RUN3_SECS and t < RUN4_SECS:
+            w=1.5
+            TEST_MODE = "SIN"
+        elif t > RUN4_SECS:
+            TEST_MODE = "PLATEAUS"
+        
         if t > RUN_SECS:
             break
 
@@ -629,7 +644,7 @@ try:
 
             # TEST TEST TEST
             # qd0_f = qd0
-            qdd0_f = qdd0_des
+            # qdd0_f = qdd0_des
             # qdd0_f = 0.0
             # q_prev= q0
 
@@ -637,7 +652,7 @@ try:
                 arm_id,
                 [q0],
                 [qd0_f],
-                [qdd0_f]
+                [qdd0_des] # CHANGED TO DESIRED
             ))
             tau_model0 = float(tau_model[0])
     
