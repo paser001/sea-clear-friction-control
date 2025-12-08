@@ -16,18 +16,4 @@
     <limit lower="-300.14" upper="300.14" effort="50" velocity="6.0"/>
   </joint>
 
-  <link name="link2">
-    <inertial><origin xyz="0.25 0 0"/><mass value="0.01"/><inertia ixx="1e-6" iyy="1e-6" izz="1e-6"/></inertial>
-    <visual><origin xyz="0.25 0 0"/><geometry><box size="0.5 0.08 0.08"/></geometry></visual>
-    <collision><origin xyz="0.25 0 0"/><geometry><box size="0.5 0.08 0.08"/></geometry></collision>
-  </link>
-
-  <joint name="joint2" type="revolute">
-    <parent link="link1"/>
-    <child link="link2"/>
-    <origin xyz="0.5 0 0" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <dynamics damping="0.0" friction="0.0"/>
-    <limit lower="-300.14" upper="300.14" effort="50" velocity="6.0"/>  
-  </joint>
 </robot>
