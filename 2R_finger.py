@@ -56,10 +56,14 @@ v_eps_simple = 0.02   # smoothing speed [rad/s]
 
 
 # ----- Plateau config -----
-q_min = -1.8   # rlower bound
-q_max =  1.8   # upper bound
+q_min = -100.8   # rlower bound
+q_max =  100.8   # upper bound
 
-plateau_speeds = [0.3,0.5, 0.8, 1.6, 2.0]  # rad.sec^-1
+# plateau_speeds = [0.3,0.5, 0.8, 1.6, 2.0]  # rad.sec^-1
+
+plateau_speeds = [0.3,0.5, 0.8, 1.6, 2.0, 2.5, 2.2, 2.8, 3.0, 1.7, 1.5, 1.3, 1.0]  # rad.sec^-1
+
+plateau_speeds.reverse()  # start with fast speeds
 plateau_time   = 15.0               # seconds per plateau
 
 
@@ -96,7 +100,7 @@ v_coul = 0.07      # Coulomb saturation speed (rad/s)   offline calculation
 Gamma_f = np.diag([0.1, 0.1, 0])  # adaptation gains to tune
 Gamma_f_fast = np.diag([Gamma_f[0,0],Gamma_f[1,1],0.1])
 # Gamma_f = np.zeros((3,3))
-Gamma_eps = 0.0    # bias integrator increase to enable
+Gamma_eps = 0.1    # bias integrator increase to enable
 
 
 
@@ -123,7 +127,10 @@ ADAPTATION = True
 eps = 0.0
 
 # MAIN LOOP
-TEST_MODE = "SIN"  # "PLATEAUS", "SIN"
+# TEST_MODE = "SIN"  # "PLATEAUS", "SIN"
+CUSTOM_TRIAL = False
+
+TEST_MODE = "PLATEAUS"
 
 A = math.radians(90)    # amplit
 w = 2.5                 # rad/s
@@ -469,16 +476,17 @@ try:
 
 
         t = time.time() - t0
-        if t > RUN1_SECS and t < RUN2_SECS:
-            TEST_MODE = "PLATEAUS"
-        elif t > RUN2_SECS and t < RUN3_SECS:
-            w=2.5
-            TEST_MODE = "SIN"
-        elif t > RUN3_SECS and t < RUN4_SECS:
-            w=1.5
-            TEST_MODE = "SIN"
-        elif t > RUN4_SECS:
-            TEST_MODE = "PLATEAUS"
+        if CUSTOM_TRIAL:
+            if t > RUN1_SECS and t < RUN2_SECS:
+                TEST_MODE = "PLATEAUS"
+            elif t > RUN2_SECS and t < RUN3_SECS:
+                w=2.5
+                TEST_MODE = "SIN"
+            elif t > RUN3_SECS and t < RUN4_SECS:
+                w=1.5
+                TEST_MODE = "SIN"
+            elif t > RUN4_SECS:
+                TEST_MODE = "PLATEAUS"
         
         if t > RUN_SECS:
             break
