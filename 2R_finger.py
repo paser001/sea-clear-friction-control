@@ -24,7 +24,6 @@ RUN3_SECS= 480.0
 RUN4_SECS = 540.0
 
 
-
 DT = 1.0/240.0
 DOF = 1               
 JIDX = 0                  # identify friction on joint 1
@@ -127,7 +126,7 @@ eps = 0.0
 TEST_MODE = "SIN"  # "PLATEAUS", "SIN"
 
 A = math.radians(90)    # amplit
-w = 3.3                 # rad/s
+w = 2.5                 # rad/s
 
 
 err_int = 0.0
@@ -261,6 +260,7 @@ def plateau_builder():
 
 
 # ---------- Disable default motors, center pose ----------
+
 for j in range(DOF):
     p.setJointMotorControl2(arm_id, j, p.VELOCITY_CONTROL, force=0)
 for j in range(DOF):
@@ -269,7 +269,7 @@ for j in range(DOF):
 # goto(q1=-0.59695293, q2=-0.39810182, steps=1)
 goto(arm_id, q1=START_POS[0], q2=START_POS[1])
 goto(ghost_id, q1=START_POS[0], q2=START_POS[1])
-sleep_temp(480)
+sleep_temp(240)
 for j in range(DOF): 
     p.setJointMotorControl2(arm_id, j, p.VELOCITY_CONTROL, force=0)
 
@@ -288,7 +288,6 @@ header = [
     "theta1","theta2","theta3",
     "s", "eps", "tau_fb"
 ]
-
 
 
 # Helper: end-effector world pose
@@ -335,9 +334,9 @@ def Yf1(v, v_st, v_coul): # OVERFLOWS QUITE OFTEN
         np.exp(-(v / v_st)) * (v / v_st),
         np.tanh(v / v_coul),
         v
-    ])  # shape (3,) but check error
+    ])  
 
-def Yf2(v, v_st, v_coul, v_clip=2.0, eps=1e-6):  # SAFE CHAT GPT VERSION
+def Yf2(v, v_st, v_coul, v_clip=5.0, eps=1e-6):  # SAFE CHAT GPT VERSION
     v_st   = max(abs(v_st), eps)
     v_coul = max(abs(v_coul), eps) # these 2 kinda useless tbh they re fixed parameters
 
@@ -385,17 +384,15 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     tau_fb = float(np.clip(tau_fb, -10.5, 10.5))
     tau_cmd = tau_model + tau_fb + tau_hat_f + eps
 
-    if abs(s)>2.5:
-        tau_cmd =0.0 # TEST, DELETE LATER
-
-    print("tau_fb:", tau_fb)
+    # if abs(s)>2.5:
+    #     tau_cmd =0.0 # TEST, DELETE LATER
 
 
     # # theta_dot = -Gamma_f * phi^T * s
     # theta_update = - (Gamma_f @ (phi * s)) * dt  # broadcasts
     # theta_new = theta_f + theta_update
     
-    if abs(s)>0.008 and abs(s_adapt)<0.5 and abs(qd)>0.1 and ADAPTATION == True : # only learn when moving
+    if abs(s)>0.0 and abs(s_adapt)<0.5 and abs(qd)>0.1 and ADAPTATION == True : # only learn when moving
         if abs(qd)<1.5:
             # theta_new = theta_f - ([Gamma_f[0],Gamma_f[1],0.0] @ (phi * s_adapt)) * dt
             theta_new = theta_f - (Gamma_f @ (phi * s_adapt)) * dt
@@ -697,8 +694,8 @@ try:
 
             qd_des_f = qd_des_vec[0]  # des velo
             q_des_f = q_des_vec[0]  # desired pos
-            print("qd:", qd0_des, "qd error", qd0_f - qd_des_f)
-            print("q error", q0 - q_des_f)
+            # print("qd:", qd0_des, "qd error", qd0_f - qd_des_f)
+            # print("q error", q0 - q_des_f)
 
             tau0_cmd, tau0_hat_f, s0, theta_snapshot, eps_now = step_adaptive(
                 q=q_vec[0], qd=qd0_f,
