@@ -17,12 +17,13 @@ L1, L2 = 0.5, 0.5          # link lengths
 M1= 2.0
 M2= 2.0
 TMAX = 2.0
-RUN_SECS = 660.0
+RUN_SECS = 120.0
 RUN1_SECS = 120.0
 RUN2_SECS = 420.0
 RUN3_SECS= 480.0
 RUN4_SECS = 540.0
-
+RUN5_SECS = 500.0
+ONCE = True
 
 DT = 1.0/240.0
 DOF = 1               
@@ -49,6 +50,10 @@ Fc_true = 0.1     # Nm  (Coulomb)
 Fs_true = 0.12     # Nm  (static peak)
 Fv_true = 0.02     # Nms/rad (viscous)
 vs_true = 0.10     # rad/s  (Stribeck speed)
+
+
+
+
 noise_sigma = 0.01 # Nm (torque noise)
 Fc_simple = 0.15      # Coulomb friction [Nm]
 Fv_simple = 0.02      # viscous friction [Nms/rad]
@@ -56,15 +61,16 @@ v_eps_simple = 0.02   # smoothing speed [rad/s]
 
 
 # ----- Plateau config -----
-q_min = -100.8   # rlower bound
-q_max =  100.8   # upper bound
+q_min = -1.8   # rlower bound
+q_max =  1.8   # upper bound
 
 # plateau_speeds = [0.3,0.5, 0.8, 1.6, 2.0]  # rad.sec^-1
 
-plateau_speeds = [0.3,0.5, 0.8, 1.6, 2.0, 2.5, 2.2, 2.8, 3.0, 1.7, 1.5, 1.3, 1.0]  # rad.sec^-1
+plateau_speeds = [0.3,0.5, 0.8, 1.6, 2.0, 2.5, 2.2, 2.8, 3.0, 4.0, 4.5, 3.5, 1.7, 1.5, 1.3, 1.0]  # rad.sec^-1
 
 plateau_speeds.reverse()  # start with fast speeds
-plateau_time   = 15.0               # seconds per plateau
+plateau_time   = 8.0               # seconds per plateau
+bounce_timer = 0.0
 
 
 # PLATEU 2
@@ -97,13 +103,14 @@ v_coul = 0.07      # Coulomb saturation speed (rad/s)   offline calculation
 
 
 # Gamma_f = np.diag([0.01, 0.05, 0.01])  # adaptation gains to tune
-Gamma_f = np.diag([0.1, 0.1, 0])  # adaptation gains to tune
+Gamma_f = np.diag([0.4, 0.1, 0])  # adaptation gains to tune
 Gamma_f_fast = np.diag([Gamma_f[0,0],Gamma_f[1,1],0.1])
 # Gamma_f = np.zeros((3,3))
 Gamma_eps = 0.1    # bias integrator increase to enable
 
 
-
+ 
+adapt_freeze_timer = 0.0
 
 
 
@@ -117,8 +124,9 @@ Lambda = 1.2     # 0.5 is good for adapative on
 
 # init parameters offline fit or small positive guesses
 # theta_f = np.array([0.01, 0.01, 0.005]) # MEH START
-theta_f = np.array([0.015, 0.08, 0.015])
+# theta_f = np.array([0.015, 0.08, 0.015])
 # theta_f = np.array([0.0001, 0.0001, 0.0001])  # start neutral 
+theta_f = np.array([0.015, 0.1, 0.025])
 s_clip = 0.5
 tau_hat_f_clip = 8.0
 
@@ -130,10 +138,10 @@ eps = 0.0
 # TEST_MODE = "SIN"  # "PLATEAUS", "SIN"
 CUSTOM_TRIAL = False
 
-TEST_MODE = "PLATEAUS"
+TEST_MODE = "SIN"
 
 A = math.radians(90)    # amplit
-w = 2.5                 # rad/s
+w = 0.2                 # rad/s
 
 
 err_int = 0.0
@@ -296,6 +304,11 @@ header = [
     "s", "eps", "tau_fb"
 ]
 
+def log_marker_row(t):
+    N_COLS = len(header)
+    return [t] + [float('nan')] * (N_COLS - 1)
+
+
 
 # Helper: end-effector world pose
 def ee_pose():
@@ -362,7 +375,29 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     e  = q  - q_des
     ed = qd - qd_des
 
-    print("e:", e, "ed:", ed)
+
+    # AVOID LEARNING NEAR JOINT LIMITS
+
+    q_next = q + qd * dt   # 1-step prediction (good enough)
+    margin = 0.2
+
+
+
+    near_limit_now  = (q <= q_min + margin) or (q >= q_max - margin)
+    will_hit_limit  = (q_next <= q_min + margin) or (q_next >= q_max - margin)
+
+    adapt_ok = (not near_limit_now) and (not will_hit_limit)
+
+
+    if will_hit_limit:
+        adapt_freeze_timer = 0.2  # seconds
+
+    # if adapt_freeze_timer > 0:
+    #     adapt_ok = False
+    #     adapt_freeze_timer -= dt
+
+
+    # print("e:", e, "ed:", ed)
 
     if warmup:
         s = 0.0
@@ -373,7 +408,7 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
         # s_adapt = np.clip(s, -s_clip, s_clip)
         
 
-    print("s:", s)
+    # print("s:", s)
 
     # friction estimate
     phi = Yf2(qd, v_st, v_coul)         # (3,)
@@ -398,8 +433,10 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     # # theta_dot = -Gamma_f * phi^T * s
     # theta_update = - (Gamma_f @ (phi * s)) * dt  # broadcasts
     # theta_new = theta_f + theta_update
+
     
-    if abs(s)>0.0 and abs(s_adapt)<0.5 and abs(qd)>0.1 and ADAPTATION == True : # only learn when moving
+    
+    if abs(s)>0.0 and abs(s_adapt)<0.5 and abs(qd)>0.1 and ADAPTATION == True and adapt_ok : # only learn when moving
         if abs(qd)<1.5:
             # theta_new = theta_f - ([Gamma_f[0],Gamma_f[1],0.0] @ (phi * s_adapt)) * dt
             theta_new = theta_f - (Gamma_f @ (phi * s_adapt)) * dt
@@ -487,6 +524,21 @@ try:
                 TEST_MODE = "SIN"
             elif t > RUN4_SECS:
                 TEST_MODE = "PLATEAUS"
+
+        if t> RUN5_SECS and ONCE:
+            # Fc_true = 0.2     # Nm  (Coulomb)
+            # Fs_true = 0.24     # Nm  (static peak)
+            # Fv_true = 0.04     # Nms/rad (viscous)
+            # vs_true = 0.20     # rad/s  (Stribeck speed)
+            # exc_idx    = 0
+            # t_plateau  = 0.0
+            # v_ref      = 0.0
+            # q0_des     = q_vec[0]
+            q_min = -100.8   # rlower bound
+            q_max =  100.8   # upper bound
+            ADAPTATION = False
+            log.append(log_marker_row(t))
+            ONCE = False
         
         if t > RUN_SECS:
             break
@@ -518,15 +570,17 @@ try:
             # integrate velocity to get desired position
             q0_des = q0_des + v_ref * DT
 
-            # clamp position and reflect velocity if we hit joint limits
+            
             if q0_des > q_max:
                 q0_des = q_max
                 v_ref  = -abs(v_ref)
-                #t_plateau = 0.0               # restart plateau timer on bounce
+                exc_idx = (exc_idx + 1) % len(plateau_seq)  # flip sign immediately
+                t_plateau = 0.0             # restart plateau timer on bounce
             elif q0_des < q_min:
                 q0_des = q_min
                 v_ref  = +abs(v_ref)
-                #t_plateau = 0.0
+                exc_idx = (exc_idx + 1) % len(plateau_seq)  # flip sign immediately
+                t_plateau = 0.0
 
             qd0_des  = v_ref
             qdd0_des = (qd0_des - qd_des_prev) / DT  # approximate acceleration
