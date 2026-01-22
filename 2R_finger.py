@@ -26,8 +26,9 @@ RUN5_SECS = 500.0
 ONCE = True
 
 DT = 1.0/240.0
-DOF = 1               
+DOF = 2               
 JIDX = 0                  # identify friction on joint 1
+JOINTS = list(range(DOF))
 OTHER = 1
 t0 = time.time()
 log = []
@@ -51,8 +52,13 @@ Fs_true = 0.12     # Nm  (static peak)
 Fv_true = 0.02     # Nms/rad (viscous)
 vs_true = 0.10     # rad/s  (Stribeck speed)
 
+#joint 1 values
+Fs_true_1= 0.2
+Fc_true_1= 0.24
+Fv_true_1 = 0.04
+vs_true_1 = 0.20
 
-
+# SIMPLE MODEL
 
 noise_sigma = 0.01 # Nm (torque noise)
 Fc_simple = 0.15      # Coulomb friction [Nm]
@@ -101,6 +107,8 @@ v_st   = 0.1     # Stribeck transition speed (rad/s) offline calculation
 v_coul = 0.07      # Coulomb saturation speed (rad/s)   offline calculation
 
 
+eps = np.zeros(DOF)
+
 
 # Gamma_f = np.diag([0.01, 0.05, 0.01])  # adaptation gains to tune
 Gamma_f = np.diag([0.4, 0.1, 0])  # adaptation gains to tune
@@ -126,22 +134,27 @@ Lambda = 1.2     # 0.5 is good for adapative on
 # theta_f = np.array([0.01, 0.01, 0.005]) # MEH START
 # theta_f = np.array([0.015, 0.08, 0.015])
 # theta_f = np.array([0.0001, 0.0001, 0.0001])  # start neutral 
-theta_f = np.array([0.015, 0.1, 0.025])
+# theta_f = np.array([0.015, 0.1, 0.025]) # GOOD START
+theta_f = np.zeros((DOF, 3))
+theta_f[0] = np.array([0.015, 0.10, 0.025])   # joint0 init guess
+theta_f[1] = np.array([0.030, 0.2, 0.050])   # joint1 init guess (Double friction)
+
+
+
+
 s_clip = 0.5
 tau_hat_f_clip = 8.0
 
 ADAPTATION = True
 
-eps = 0.0
-
 # MAIN LOOP
 # TEST_MODE = "SIN"  # "PLATEAUS", "SIN"
 CUSTOM_TRIAL = False
 
-TEST_MODE = "SIN"
+TEST_MODE = "PLATEAUS"
 
 A = math.radians(90)    # amplit
-w = 0.2                 # rad/s
+w = 0.1                 # rad/s
 
 
 err_int = 0.0
@@ -196,22 +209,66 @@ def sleep_temp(t):
 # URDF for the 2R finger
 # -------------------------
 # TODO CHANGE ANGLE LIMITES
+
 urdf = f"""<?xml version="1.0"?>
 <robot name="finger2r">
+
+  <!-- Base -->
   <link name="base"/>
+
+  <!-- Link 1 -->
   <link name="link1">
-    <inertial><origin xyz="{L1/2} 0 0"/><mass value="2.0"/><inertia ixx="0.0417" iyy="0.0417" izz="0.0417"/></inertial>
-    <visual><origin xyz="{L1/2} 0 0"/><geometry><box size="{L1} 0.08 0.08"/></geometry></visual>
-    <collision><origin xyz="{L1/2} 0 0"/><geometry><box size="{L1} 0.08 0.08"/></geometry></collision>
+    <inertial>
+      <origin xyz="0.25 0 0" rpy="0 0 0"/>
+      <mass value="2.0"/>
+      <!-- Replace inertia with values from your chosen geometry (see python generator below) -->
+      <inertia ixx="0.0030" iyy="0.0030" izz="0.0018" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.25 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.5 0.08 0.08"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.25 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.5 0.08 0.08"/></geometry>
+    </collision>
   </link>
 
+  <!-- Joint 1 -->
   <joint name="joint1" type="revolute">
     <parent link="base"/>
     <child link="link1"/>
     <origin xyz="0 0 0.05" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
+    <limit lower="-200.6" upper="200.6" effort="200" velocity="6.0"/>
     <dynamics damping="0.0" friction="0.0"/>
-    <limit lower="-300.14" upper="300.14" effort="50" velocity="6.0"/>
+  </joint>
+
+  <!-- Link 2 -->
+  <link name="link2">
+    <inertial>
+      <origin xyz="0.25 0 0" rpy="0 0 0"/>
+      <mass value="2.0"/>
+      <inertia ixx="0.0030" iyy="0.0030" izz="0.0018" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.25 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.5 0.07 0.07"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.25 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.5 0.07 0.07"/></geometry>
+    </collision>
+  </link>
+
+  <!-- Joint 2 -->
+  <joint name="joint2" type="revolute">
+    <parent link="link1"/>
+    <child link="link2"/>
+    <origin xyz="0.5 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-200.6" upper="200.6" effort="200" velocity="6.0"/>
+    <dynamics damping="0.0" friction="0.0"/>
   </joint>
 
 </robot>
@@ -242,9 +299,12 @@ for j in range(DOF):
 
 # Move to an angle positon over some steps
 def goto(id, q1, q2, steps=480):
-    p.setJointMotorControl2(arm_id, 0, p.POSITION_CONTROL,
-                            targetPosition=q1, force=20,
-                            positionGain=0.1, velocityGain=1.0)
+    p.setJointMotorControl2(id, 0, p.POSITION_CONTROL,
+                            targetPosition=q1, force=80,
+                            positionGain=0.2, velocityGain=1.0)
+    p.setJointMotorControl2(id, 1, p.POSITION_CONTROL,
+                            targetPosition=q2, force=80,
+                            positionGain=0.2, velocityGain=1.0)
     for _ in range(steps):
         p.stepSimulation(); time.sleep(DT)
     # release motors for torque control
@@ -256,12 +316,12 @@ def tau_f_simple(qd):
     return Fc_simple * np.tanh(qd / v_eps_simple) + Fv_simple * qd
 
 
-def tau_f_true(qd, simple = False):
+def tau_f_true(qd, simple = False, Fs=Fs_true, Fc=Fc_true, Fv=Fv_true, vs=vs_true):
     if simple:
         return tau_f_simple(qd)
     else:
-        mag = Fc_true + (Fs_true - Fc_true) * np.exp(-(abs(qd)/vs_true)**2)
-        return mag * np.sign(qd) + Fv_true * qd
+        mag = Fc + (Fs - Fc) * np.exp(-(abs(qd)/vs)**2)
+        return mag * np.sign(qd) + Fv * qd
 
 
 
@@ -356,9 +416,9 @@ def Yf1(v, v_st, v_coul): # OVERFLOWS QUITE OFTEN
         v
     ])  
 
-def Yf2(v, v_st, v_coul, v_clip=5.0, eps=1e-6):  # SAFE CHAT GPT VERSION
-    v_st   = max(abs(v_st), eps)
-    v_coul = max(abs(v_coul), eps) # these 2 kinda useless tbh they re fixed parameters
+def Yf2(v, v_st, v_coul, v_clip=5.0, epss=1e-6):  # SAFE CHAT GPT VERSION
+    v_st   = max(abs(v_st), epss)
+    v_coul = max(abs(v_coul), epss) # these 2 kinda useless tbh they re fixed parameters
 
     v_sat  = float(np.clip(v, -v_clip, v_clip))
     # use |v|/v_st in the Stribeck envelope; keep odd symmetry via the multiplier
@@ -368,9 +428,9 @@ def Yf2(v, v_st, v_coul, v_clip=5.0, eps=1e-6):  # SAFE CHAT GPT VERSION
         v_sat                                            # viscous
     ])
 
-def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
+def step_adaptive(j, q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     # tracking
-    global theta_f, eps
+    global theta_f, eps, adapt_freeze_timer
     
     e  = q  - q_des
     ed = qd - qd_des
@@ -412,7 +472,7 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
 
     # friction estimate
     phi = Yf2(qd, v_st, v_coul)         # (3,)
-    tau_hat_f = float(phi @ theta_f)   # scalar
+    tau_hat_f = float(phi @ theta_f[j])   # scalar
     tau_hat_f = float(np.clip(tau_hat_f, -tau_hat_f_clip, tau_hat_f_clip))
 
     # tau_hat_f =0.0 # TEST, DELETE LATER
@@ -424,7 +484,7 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     tau_fb  = -Kd_s * s
     # tau_fb = Kp*(q_des - q) + Kd*(qd_des - qd) # SAFE PD CONTROLER
     tau_fb = float(np.clip(tau_fb, -10.5, 10.5))
-    tau_cmd = tau_model + tau_fb + tau_hat_f + eps
+    tau_cmd = tau_model + tau_fb + tau_hat_f + eps[j]
 
     # if abs(s)>2.5:
     #     tau_cmd =0.0 # TEST, DELETE LATER
@@ -439,27 +499,26 @@ def step_adaptive(q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
     if abs(s)>0.0 and abs(s_adapt)<0.5 and abs(qd)>0.1 and ADAPTATION == True and adapt_ok : # only learn when moving
         if abs(qd)<1.5:
             # theta_new = theta_f - ([Gamma_f[0],Gamma_f[1],0.0] @ (phi * s_adapt)) * dt
-            theta_new = theta_f - (Gamma_f @ (phi * s_adapt)) * dt
+            theta_new = theta_f[j] - (Gamma_f @ (phi * s_adapt)) * dt
             print("Adapting (low speed)")
         else:
-            theta_new = theta_f - (Gamma_f_fast @ (phi * s_adapt)) * dt
+            theta_new = theta_f[j] - (Gamma_f_fast @ (phi * s_adapt)) * dt
         theta_new[1] = max(theta_new[1], 0.0)  # f_c sempre positivo
         theta_new[2] = max(theta_new[2], 0.0)  # f_vis sempre positivo
-        delta = np.clip(theta_new - theta_f, -0.05, 0.05) # TO TUNE
-        theta_f[:] = theta_f + delta
-        print("Theta updated:", theta_f)
+        delta = np.clip(theta_new - theta_f[j], -0.05, 0.05) # TO TUNE
+        theta_f[j] = theta_f[j] + delta
+        print("Theta", j, "updated:", theta_f[j])
 
     # bias integrator
     if Gamma_eps > 0.0:
-        eps += -Gamma_eps * s * dt
+        eps[j] += -Gamma_eps * s * dt
 
-    return tau_cmd, tau_hat_f, s, theta_f.copy(), eps
+    return tau_cmd, tau_hat_f, s, theta_f[j].copy(), eps[j]
 
 
 
 # -------------------------
 # Main loop
-# - 
 # - 
 # -------------------------
 
@@ -493,7 +552,7 @@ set_camera_top()
 print("Running")
 
 try:
-    print("Friction test moving joint 0 slow")
+    print("Friction test moving joint 0 and 1 slow")
 
     while p.isConnected():
         keys = p.getKeyboardEvents()
@@ -552,6 +611,11 @@ try:
             q0_des  = A * math.sin(w*t)
             qd0_des = A*w * math.cos(w*t)
             qdd0_des = -A*w*w * math.sin(w*t)
+
+            q1_des  = A * math.sin(w*t)
+            qd1_des = A*w * math.cos(w*t)
+            qdd1_des = -A*w*w * math.sin(w*t)
+
         elif TEST_MODE == "PLATEAUS":
             t_sim += DT
             t_plateau += DT
@@ -634,6 +698,8 @@ try:
         # ----------- SAFE BASELINE CONTROL --------------
         q0 = q_vec[0]
         qd0 = qd_vec[0]
+        q1 = q_vec[1]
+        qd1 = qd_vec[1]
 
         # gravity only (no C, no M yet)
         # G = np.array(p.calculateInverseDynamics(arm_id, [q0, q_vec[1]], [0.0,0.0], [0.0,0.0]))
@@ -642,6 +708,7 @@ try:
         #----------------GHOST ARM--------------------
         # Pose ghost arm at desired trajectory (sinusoidal reference)
         p.resetJointState(ghost_id, 0, q0_des, qd0_des)
+        p.resetJointState(ghost_id, 1, q1_des, qd1_des)
 
 
         # # Gravity G(q)  [2] with q=0 qdot=0
@@ -706,19 +773,25 @@ try:
             # qdd0_f = qdd0_des
             # qdd0_f = 0.0
             # q_prev= q0
+            q1= 0.0
+            qd1_f= 0.0
+            qdd1_des= 0.0
+
+
 
             tau_model = np.array(p.calculateInverseDynamics(
                 arm_id,
-                [q0],
-                [qd0_f],
-                [qdd0_des] # CHANGED TO DESIRED
+                [q0, q1],
+                [qd0_f, qd1_f],
+                [qdd0_des, qdd1_des] # CHANGED TO DESIRED
             ))
             tau_model0 = float(tau_model[0])
+            tau_model1 = float(tau_model[1])
     
             
 
 
-        tau1_cmd = 0.0  # joint 2 no friction ID for now
+        # tau1_cmd = 0.0  # joint 2 no friction ID for now
 
         # ------------- SAFE BASELINE CONTROL -------------
         # tau_fb_safe = Kp*(q0_des - q_vec[0]) + Kd*(qd0_des - qd0_f)
@@ -760,9 +833,21 @@ try:
             # print("q error", q0 - q_des_f)
 
             tau0_cmd, tau0_hat_f, s0, theta_snapshot, eps_now = step_adaptive(
+                j=0,
                 q=q_vec[0], qd=qd0_f,
                 q_des=q_des_f, qd_des=qd_des_f, qdd_des=qdd0_des,
                 dt=DT, tau_model=tau_model0,
+                warmup=False
+            )
+
+            qd_des_f = qd_des_vec[1]  # des velo
+            q_des_f = q_des_vec[1]  # desired pos
+
+            tau1_cmd, tau1_hat_f, s1, theta_snapshot, eps_now = step_adaptive(
+                j=1,
+                q=q_vec[1], qd=qd1_f,
+                q_des=q_des_f, qd_des=qd_des_f, qdd_des=qdd1_des,
+                dt=DT, tau_model=tau_model1,
                 warmup=False
             )
     
@@ -777,13 +862,23 @@ try:
         tau_applied = float(np.clip(tau_applied, -8, 8))
         p.setJointMotorControl2(arm_id, 0, p.TORQUE_CONTROL, force=tau_applied) # ONLY 1 joint
         # p.setJointMotorControl2(arm_id, 0, p.TORQUE_CONTROL, 2) # TEST 2Nm
+
+        #APPLY TORQUE WITH KNOWN FRICTION MODEL
+        tau_f_true_val = tau_f_true(qd1_f, simple = False, Fs=Fs_true_1, Fc=Fc_true_1, Fv=Fv_true_1, vs=vs_true_1)
+        tau_applied = tau1_cmd - tau_f_true_val   # friction opposes motion 
+        tau_applied = float(np.clip(tau_applied, -8, 8))
+        p.setJointMotorControl2(arm_id, 1, p.TORQUE_CONTROL, force=tau_applied) # ONLY 1 joint
+
         
         p.stepSimulation()
         time.sleep(DT)
 
         tau_meas0 = tau0_cmd
+        tau_meas1 = tau1_cmd
         tau_res0  = tau_meas0 - tau_model0
+        tau_res1  = tau_meas1 - tau_model1
 
+        print(qd0_des, qd1_des)
         
         if not(i % 100) and i>0:
 
