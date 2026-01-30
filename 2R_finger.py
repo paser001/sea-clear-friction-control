@@ -22,7 +22,7 @@ RUN1_SECS = 120.0
 RUN2_SECS = 420.0
 RUN3_SECS= 480.0
 RUN4_SECS = 540.0
-RUN5_SECS = 500.0
+RUN5_SECS = 600.0
 ONCE = True
 
 DT = 1.0/240.0
@@ -70,11 +70,15 @@ v_eps_simple = 0.02   # smoothing speed [rad/s]
 q_min = -1.8   # rlower bound
 q_max =  1.8   # upper bound
 
-# plateau_speeds = [0.3,0.5, 0.8, 1.6, 2.0]  # rad.sec^-1
+plateau_speeds = [0.3,0.5, 2.5,  0.8, 1.6, 2.0, 2.7, 1.7, 1.3, 2.5, 0.7, 0.4]  # rad.sec^-1
 
-plateau_speeds = [0.3,0.5, 0.8, 1.6, 2.0, 2.5, 2.2, 2.8, 3.0, 4.0, 4.5, 3.5, 1.7, 1.5, 1.3, 1.0]  # rad.sec^-1
+# plateau_speeds = [0.3,0.5, 0.8, 1.6, 2.0, 2.5, 2.2, 2.8, 3.0, 4.0, 4.5, 3.5, 1.7, 1.5, 1.3, 1.0]  # rad.sec^-1
 
-plateau_speeds.reverse()  # start with fast speeds
+# plateau_speeds.reverse()  # start with fast speeds
+plateau_speeds_0 = plateau_speeds[:]               
+plateau_speeds_1 = list(reversed(plateau_speeds_0))  
+
+
 plateau_time   = 8.0               # seconds per plateau
 bounce_timer = 0.0
 
@@ -131,13 +135,12 @@ Lambda = 1.2     # 0.5 is good for adapative on
 # s  = edot + Lambda * e
 
 # init parameters offline fit or small positive guesses
-# theta_f = np.array([0.01, 0.01, 0.005]) # MEH START
-# theta_f = np.array([0.015, 0.08, 0.015])
-# theta_f = np.array([0.0001, 0.0001, 0.0001])  # start neutral 
 # theta_f = np.array([0.015, 0.1, 0.025]) # GOOD START
+
+
 theta_f = np.zeros((DOF, 3))
-theta_f[0] = np.array([0.015, 0.10, 0.025])   # joint0 init guess
-theta_f[1] = np.array([0.030, 0.2, 0.050])   # joint1 init guess (Double friction)
+# theta_f[0] = np.array([0.015, 0.10, 0.025])   # joint0 init guess
+# theta_f[1] = np.array([0.030, 0.2, 0.050])   # joint1 init guess (Double friction)
 
 
 
@@ -164,8 +167,6 @@ qd0_prev = 0.0
 FS = 1/DT
 CUTOFF = 25.0  # Hz for filtering
 
-q_prev = 0.0
-qd_f_prev = 0.0
 
 Kd_warmup = 8.0
 Kp_warmup = 0.4
@@ -240,7 +241,7 @@ urdf = f"""<?xml version="1.0"?>
     <child link="link1"/>
     <origin xyz="0 0 0.05" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-200.6" upper="200.6" effort="200" velocity="6.0"/>
+    <limit lower="-1.8" upper="1.8" effort="200" velocity="6.0"/>
     <dynamics damping="0.0" friction="0.0"/>
   </joint>
 
@@ -267,7 +268,7 @@ urdf = f"""<?xml version="1.0"?>
     <child link="link2"/>
     <origin xyz="0.5 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-200.6" upper="200.6" effort="200" velocity="6.0"/>
+    <limit lower="-1.8" upper="1.8" effort="200" velocity="6.0"/>
     <dynamics damping="0.0" friction="0.0"/>
   </joint>
 
@@ -334,6 +335,23 @@ def plateau_builder():
     return plateau_seq
 
 
+def plateau_seq_from_speeds(speeds):
+    seq = []
+    for v in speeds:
+        seq.append(+v)
+        seq.append(-v)
+    return seq
+
+plateau_seq = {
+    0: plateau_seq_from_speeds(plateau_speeds_0),
+    1: plateau_seq_from_speeds(plateau_speeds_1),
+}
+
+
+
+
+
+
 # ---------- Disable default motors, center pose ----------
 
 for j in range(DOF):
@@ -356,13 +374,15 @@ csv_path = f"csvs/fric_sweep_{datetime.now():%Y-%m-%d_%H-%M-%S}.csv"
 log = []
 header = [
     "t",
-    "q","qd_f","qdd_f",
-    "q_des","qd_des","qdd_des",
-    "tau_cmd","tau_model",
-    "tau_res","tau_hat_f", "tau_f_true","tau_f_err",
-    "theta1","theta2","theta3",
-    "s", "eps", "tau_fb"
+    "q0","qd0_f","qdd0_f","q0_des","qd0_des","qdd0_des",
+    "q1","qd1_f","qdd1_f","q1_des","qd1_des","qdd1_des",
+    "tau0_cmd","tau0_model","tau0_res","tau0_hat_f","tau0_f_true","tau0_f_err",
+    "tau1_cmd","tau1_model","tau1_res","tau1_hat_f","tau1_f_true","tau1_f_err",
+    "theta0_1","theta0_2","theta0_3",
+    "theta1_1","theta1_2","theta1_3",
+    "s0","s1","eps0","eps1"
 ]
+
 
 def log_marker_row(t):
     N_COLS = len(header)
@@ -523,27 +543,56 @@ def step_adaptive(j, q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
 # -------------------------
 
 
-sos = butter(2, CUTOFF, btype='low', fs=FS, output='sos') 
-zi_v = sosfilt_zi(sos)
-q_prev = p.getJointState(arm_id, 0)[0]
-
+# ---- butter filter states per joint ----
+sos_v = butter(2, CUTOFF, btype='low', fs=FS, output='sos')
 sos_a = butter(2, CUTOFF, btype='low', fs=FS, output='sos')
-zi_a = sosfilt_zi(sos_a)
+
+zi_v = [sosfilt_zi(sos_v) for _ in range(DOF)]
+zi_a = [sosfilt_zi(sos_a) for _ in range(DOF)]
+
+q_prev = np.array([p.getJointState(arm_id, j)[0] for j in range(DOF)], dtype=float)
+qd_f_prev = np.zeros(DOF)
+
+qd_f = np.zeros(DOF)
+qdd_f = np.zeros(DOF)
 
 
 i = 0
 
 # ----- Plateau excitation state -----
-plateau_seq = plateau_builder()      # build once
-exc_idx = 0                          # which plateau (index in plateau_seq)
-v_ref = 0.0                          # filtered/commanded velocity
-q0_des = p.getJointState(arm_id, 0)[0]  # start from current q0
+# plateau_seq = plateau_builder()      # build once
+# exc_idx = 0                          # which plateau (index in plateau_seq)
+# v_ref = 0.0                          # filtered/commanded velocity
+# q0_des = p.getJointState(arm_id, 0)[0]  # start from current q0
 
-t_sim = 0.0                          # simulation time (integrated, not wall-clock)
-t_plateau = 0.0                      # time spent in current plateau
+# t_sim = 0.0                          # simulation time (integrated, not wall-clock)
+# t_plateau = 0.0                      # time spent in current plateau
+# alpha = 2.0 * DT                     # ramp factor for v_ref
+
+# qd_des_prev = 0.0
+
+
+
+# build per-joint plateau sequences (joint1 inverted order example)
+plateau_speeds_0 = plateau_speeds
+plateau_speeds_1 = list(reversed(plateau_speeds))
+
+plateau_seq = [
+    plateau_seq_from_speeds(plateau_speeds_0),
+    plateau_seq_from_speeds(plateau_speeds_1),
+]
 alpha = 2.0 * DT                     # ramp factor for v_ref
 
-qd_des_prev = 0.0
+exc_idx = [0]*DOF
+t_plateau = [0.0]*DOF
+v_ref = [0.0]*DOF
+
+# desired state vectors
+q_des = [p.getJointState(arm_id, j)[0] for j in range(DOF)]
+qd_des = [0.0]*DOF
+qdd_des = [0.0]*DOF
+qd_des_prev = [0.0]*DOF
+
 
 
 
@@ -593,8 +642,8 @@ try:
             # t_plateau  = 0.0
             # v_ref      = 0.0
             # q0_des     = q_vec[0]
-            q_min = -100.8   # rlower bound
-            q_max =  100.8   # upper bound
+            # q_min = -100.8   # rlower bound
+            # q_max =  100.8   # upper bound
             ADAPTATION = False
             log.append(log_marker_row(t))
             ONCE = False
@@ -617,6 +666,57 @@ try:
             qdd1_des = -A*w*w * math.sin(w*t)
 
         elif TEST_MODE == "PLATEAUS":
+            # Per-joint plateau state:
+            # plateau_seq[j] : list of target velocities (already built per joint)
+            # exc_idx[j]     : current index into plateau_seq[j]
+            # t_plateau[j]   : elapsed time in current plateau for joint j
+            # v_ref[j]       : ramped velocity command for joint j
+            # q_des[j]       : integrated desired position for joint j
+            # qd_des_prev[j] : previous desired velocity for qdd estimate
+            #
+            # Joint limits assumed same for both. If different, make q_min[j], q_max[j].
+
+            for j in range(DOF):
+                t_plateau[j] += DT
+
+                # if plateau time elapsed, switch to next plateau speed
+                if t_plateau[j] > plateau_time:
+                    exc_idx[j] = (exc_idx[j] + 1) % len(plateau_seq[j])
+                    t_plateau[j] = 0.0
+                    print(f"[joint {j}] v_tgt = {plateau_seq[j][exc_idx[j]]}")
+
+                v_tgt = plateau_seq[j][exc_idx[j]]
+
+                # smooth ramp to target velocity
+                v_ref[j] = v_ref[j] + alpha * (v_tgt - v_ref[j])
+
+                # integrate velocity to get desired position
+                q_des[j] = q_des[j] + v_ref[j] * DT
+
+                # enforce joint limits + bounce
+                if q_des[j] > q_max:
+                    q_des[j] = q_max
+                    v_ref[j] = -abs(v_ref[j])
+                    exc_idx[j] = (exc_idx[j] + 1) % len(plateau_seq[j])  # flip sign immediately
+                    t_plateau[j] = 0.0
+                elif q_des[j] < q_min:
+                    q_des[j] = q_min
+                    v_ref[j] = +abs(v_ref[j])
+                    exc_idx[j] = (exc_idx[j] + 1) % len(plateau_seq[j])  # flip sign immediately
+                    t_plateau[j] = 0.0
+
+                # desired vel/acc for this joint
+                qd_des[j]  = v_ref[j]
+                qdd_des[j] = (qd_des[j] - qd_des_prev[j]) / DT
+                qd_des_prev[j] = qd_des[j]
+
+            # unpack if you still want scalar names later in the code
+            q0_des, q1_des = q_des[0], q_des[1]
+            qd0_des, qd1_des = qd_des[0], qd_des[1]
+            qdd0_des, qdd1_des = qdd_des[0], qdd_des[1]
+
+
+        elif TEST_MODE == "PLATEAUSSS":
             t_sim += DT
             t_plateau += DT
 
@@ -757,36 +857,41 @@ try:
             tau_model0 = float(tau_model[JIDX])
 
         elif DERIVATIVE_MODE == "butter":
-            qd_fd = (q_vec[0] - q_prev)/DT
-            qd0_f, zi_v = sosfilt(sos, [qd_fd], zi=zi_v)
-            q_prev = q_vec[0]
-            qd0_f = float(qd0_f[0])
+            for j in range(DOF):
+                qd_fd = (q_vec[j] - q_prev[j]) / DT
+                out_v, zi_v[j] = sosfilt(sos_v, [qd_fd], zi=zi_v[j])
+                qd_f[j] = float(out_v[0])
+                q_prev[j] = q_vec[j]
 
-            qdd_fd = (qd0_f - qd_f_prev) / DT
-            qd_f_prev = qd0_f   
+                qdd_fd = (qd_f[j] - qd_f_prev[j]) / DT
+                qd_f_prev[j] = qd_f[j]
 
-            qdd_f_arr, zi_a = sosfilt(sos_a, [qdd_fd], zi=zi_a)
-            qdd0_f = float(qdd_f_arr[0])
+                out_a, zi_a[j] = sosfilt(sos_a, [qdd_fd], zi=zi_a[j])
+                qdd_f[j] = float(out_a[0])
+
+            qd0_f, qd1_f = qd_f[0], qd_f[1]
+            qdd0_f, qdd1_f = qdd_f[0], qdd_f[1]
 
             # TEST TEST TEST
             # qd0_f = qd0
             # qdd0_f = qdd0_des
             # qdd0_f = 0.0
-            # q_prev= q0
-            q1= 0.0
-            qd1_f= 0.0
-            qdd1_des= 0.0
+            # # q_prev= q0
+            # q1= 0.0
+            # qd1_f= 0.0
+            # qdd1_des= 0.0
 
 
 
             tau_model = np.array(p.calculateInverseDynamics(
                 arm_id,
-                [q0, q1],
+                [q_vec[0], q_vec[1]],
                 [qd0_f, qd1_f],
-                [qdd0_des, qdd1_des] # CHANGED TO DESIRED
+                [qdd0_des, qdd1_des] 
             ))
             tau_model0 = float(tau_model[0])
             tau_model1 = float(tau_model[1])
+
     
             
 
@@ -855,8 +960,8 @@ try:
         # p.setJointMotorControlArray(arm_id, [0,1], p.TORQUE_CONTROL, forces=[tau0_cmd, tau1_cmd])
         # p.setJointMotorControlArray(arm_id, [0,1], p.TORQUE_CONTROL, forces=[tau0_cmd_safe, 0.0])
         #APPLY TORQUE WITH KNOWN FRICTION MODEL
-        tau_f_true_val = tau_f_true(qd0_f, simple = False)
-        tau_applied = tau0_cmd - tau_f_true_val   # friction opposes motion 
+        tau_f_true_0 = tau_f_true(qd0_f, simple = False)
+        tau_applied = tau0_cmd - tau_f_true_0   # friction opposes motion 
         # tau_applied = tau0_cmd_safe - tau_f_simple(qd_vec[0])   # SAFER VERSION PLS
         # tau_applied = tau0_cmd #TEST PD KDS CONTROLLER
         tau_applied = float(np.clip(tau_applied, -8, 8))
@@ -864,8 +969,8 @@ try:
         # p.setJointMotorControl2(arm_id, 0, p.TORQUE_CONTROL, 2) # TEST 2Nm
 
         #APPLY TORQUE WITH KNOWN FRICTION MODEL
-        tau_f_true_val = tau_f_true(qd1_f, simple = False, Fs=Fs_true_1, Fc=Fc_true_1, Fv=Fv_true_1, vs=vs_true_1)
-        tau_applied = tau1_cmd - tau_f_true_val   # friction opposes motion 
+        tau_f_true_1 = tau_f_true(qd1_f, simple = False, Fs=Fs_true_1, Fc=Fc_true_1, Fv=Fv_true_1, vs=vs_true_1)
+        tau_applied = tau1_cmd - tau_f_true_1   # friction opposes motion 
         tau_applied = float(np.clip(tau_applied, -8, 8))
         p.setJointMotorControl2(arm_id, 1, p.TORQUE_CONTROL, force=tau_applied) # ONLY 1 joint
 
@@ -880,17 +985,24 @@ try:
 
         print(qd0_des, qd1_des)
         
-        if not(i % 100) and i>0:
-
+        if not(i % 100) and i > 0:
             log.append([
                 t,
-                float(q_vec[JIDX]), float(qd0_f), float(qdd0_f),
-                q0_des, qd0_des, qdd0_des,
-                float(tau0_cmd), float(tau_model0),
-                float(tau_res0), float(tau0_hat_f), float(tau_f_true_val), float(abs(tau_f_true_val - tau0_hat_f)),
-                float(theta_snapshot[0]), float(theta_snapshot[1]), float(theta_snapshot[2]),
-                float(s0), float(eps_now), float(tau0_cmd - tau_model0 - tau0_hat_f)
+                q0, qd0_f, qdd0_f, q0_des, qd0_des, qdd0_des,
+                q1, qd1_f, qdd1_f, q1_des, qd1_des, qdd1_des,
+
+                float(tau0_cmd), float(tau_model0), float(tau0_cmd - tau_model0), float(tau0_hat_f),
+                float(tau_f_true_0), float(abs(tau_f_true_0 - tau0_hat_f)),
+
+                float(tau1_cmd), float(tau_model1), float(tau1_cmd - tau_model1), float(tau1_hat_f),
+                float(tau_f_true_1), float(abs(tau_f_true_1 - tau1_hat_f)),
+
+                float(theta_f[0,0]), float(theta_f[0,1]), float(theta_f[0,2]),
+                float(theta_f[1,0]), float(theta_f[1,1]), float(theta_f[1,2]),
+
+                float(s0), float(s1), float(eps[0]), float(eps[1])
             ])
+
         # print("torque1:" , p.getJointState(arm_id, 0)[3], "torque2:", p.getJointState(arm_id, 1)[3])
         # print("tau1:" , tau1, "tau_meas:", tau1_meas, "tau_model:", tau_model[0], "tau_res:", tau1_res)
         print(f"({t}/{RUN_SECS})")
