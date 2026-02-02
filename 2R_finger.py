@@ -143,8 +143,6 @@ theta_f = np.zeros((DOF, 3))
 # theta_f[1] = np.array([0.030, 0.2, 0.050])   # joint1 init guess (Double friction)
 
 
-
-
 s_clip = 0.5
 tau_hat_f_clip = 8.0
 
@@ -347,11 +345,6 @@ plateau_seq = {
     1: plateau_seq_from_speeds(plateau_speeds_1),
 }
 
-
-
-
-
-
 # ---------- Disable default motors, center pose ----------
 
 for j in range(DOF):
@@ -365,7 +358,6 @@ goto(ghost_id, q1=START_POS[0], q2=START_POS[1])
 sleep_temp(240)
 for j in range(DOF): 
     p.setJointMotorControl2(arm_id, j, p.VELOCITY_CONTROL, force=0)
-
 
 # ---------- Logging setup ----------
 
@@ -387,8 +379,6 @@ header = [
 def log_marker_row(t):
     N_COLS = len(header)
     return [t] + [float('nan')] * (N_COLS - 1)
-
-
 
 # Helper: end-effector world pose
 def ee_pose():
@@ -460,7 +450,6 @@ def step_adaptive(j, q, qd, q_des, qd_des, qdd_des, dt, tau_model, warmup):
 
     q_next = q + qd * dt   # 1-step prediction (good enough)
     margin = 0.2
-
 
 
     near_limit_now  = (q <= q_min + margin) or (q >= q_max - margin)
