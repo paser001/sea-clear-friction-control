@@ -18,22 +18,16 @@ p.resetDebugVisualizerCamera(
     cameraTargetPosition=[0.0, 0.0, 0.30]
 )
 
-# -------------------------
-# Slightly transparent base (visible but subtle)
-# -------------------------
-base_pos = [0.0, 0.0, 0.55]  # higher up
+base_pos = [0.0, 0.0, 0.55]  # higher
 base_half = [0.05, 0.05, 0.01]
 base_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=base_half)
 base_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=base_half, rgbaColor=[0.8, 0.8, 0.8, 0.25])  # alpha=0.25
 base_id = p.createMultiBody(baseMass=0.0, baseCollisionShapeIndex=base_col, baseVisualShapeIndex=base_vis,
                             basePosition=base_pos)
 
-# If you want the base to be "ghosty" (no collisions), uncomment:
+# base(no collisions), uncomment:
 # p.setCollisionFilterGroupMask(base_id, -1, 0, 0)
 
-# -------------------------
-# Finger URDF: 2 links pointing down, bending about local Y (curl in local X-Z plane)
-# -------------------------
 L1, L2 = 0.06, 0.05
 W1, H1 = 0.014, 0.014
 W2, H2 = 0.013, 0.013
@@ -98,13 +92,8 @@ tmp_path = os.path.join(os.getcwd(), "finger2r_down_tmp.urdf")
 with open(tmp_path, "w") as f:
     f.write(finger_urdf)
 
-# -------------------------
-# Spawn 4 fingers in 2x2 square, yawed so they face the center
-# + IMPORTANT CHANGES:
-#   1) yaw += pi (flip 180 deg) so positive joint motion curls inward (if needed)
-#   2) disable collisions between different fingers (so they don't fight each other)
-# -------------------------
-sx, sy = 0.08, 0.08  # spacing
+
+sx, sy = 0.08, 0.08  # spacing for the offserts
 
 square_offsets = [
     (-sx/2, -sy/2),
@@ -150,9 +139,8 @@ for i in range(len(finger_ids)):
             for lb in linksB:
                 p.setCollisionFilterPair(A, B, la, lb, enableCollision=0)
 
-# -------------------------
-# Automatic open/close cycle (all fingers close toward center)
-# -------------------------
+
+
 open_j1, open_j2 = 0.0, 0.0
 close_j1, close_j2 = 1.2, 1.25  # curl amount
 
@@ -160,13 +148,12 @@ cycle_hz = 0.25
 w = 2.0 * math.pi * cycle_hz
 
 t0 = time.time()
-print("4 fingers facing inward, cycling open/close. Ctrl+C quits.")
+print("4 fingers facing inward, cycling")
 
 try:
     while p.isConnected():
         t = time.time() - t0
 
-        # smooth 0..1..0
         s = 0.5 * (1.0 - math.cos(w * t))
 
         q1 = (1 - s) * open_j1 + s * close_j1

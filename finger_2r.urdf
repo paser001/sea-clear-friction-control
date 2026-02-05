@@ -4,6 +4,7 @@
   <!-- Base -->
   <link name="base"/>
 
+  
   <!-- Link 1 -->
   <link name="link1">
     <inertial>
@@ -22,16 +23,19 @@
     </collision>
   </link>
 
+  
+
   <!-- Joint 1 -->
   <joint name="joint1" type="revolute">
     <parent link="base"/>
     <child link="link1"/>
     <origin xyz="0 0 0.05" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-1.8" upper="1.8" effort="200" velocity="6.0"/>
+    <limit lower="-100.8" upper="100.8" effort="200" velocity="6.0"/>
     <dynamics damping="0.0" friction="0.0"/>
   </joint>
 
+  
   <!-- Link 2 -->
   <link name="link2">
     <inertial>
@@ -49,13 +53,15 @@
     </collision>
   </link>
 
+  
+
   <!-- Joint 2 -->
   <joint name="joint2" type="revolute">
     <parent link="link1"/>
     <child link="link2"/>
     <origin xyz="0.5 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-1.8" upper="1.8" effort="200" velocity="6.0"/>
+    <limit lower="-100.8" upper="100.8" effort="200" velocity="6.0"/>
     <dynamics damping="0.0" friction="0.0"/>
   </joint>
 

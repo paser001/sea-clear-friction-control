@@ -11,11 +11,12 @@ def analyze(path):
     mask = df["t"] > 5.0
     mask_fric = mask & (np.abs(df["qd"]) > 0.05)
 
-    # tracking
+    # tracking errorss
     e_q = df["q"] - df["q_des"]
     e_qd = df["qd"] - df["qd_des"]
     e_q_rms = np.sqrt(np.mean(e_q[mask]**2))
     e_qd_rms = np.sqrt(np.mean(e_qd[mask]**2))
+
 
     # friction
     tau_res = df["tau_res"][mask_fric]
@@ -30,11 +31,11 @@ def analyze(path):
     tau_rough = np.mean(np.abs(np.diff(tau)))
 
     print(path)
-    print(f"  e_q_rms   = {e_q_rms:.4f}")
+    print(f" e_q_rms   = {e_q_rms:.4f}")
     print(f"  e_qd_rms  = {e_qd_rms:.4f}")
-    print(f"  fric_rms  = {fric_rms:.4f}")
+    print(f"  fric_rms= {fric_rms:.4f}")
     print(f"  fric_R2   = {fric_r2:.3f}")
-    print(f"  tau_rms   = {tau_rms:.4f}")
+    print(f"  tau_rms  = {tau_rms:.4f}")
     print(f"  tau_rough = {tau_rough:.4f}")
 
 # analyze("./csvs/friction_run_joint1_2025-11-19_11-31-52.csv")
